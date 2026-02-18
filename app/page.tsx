@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/src/lib/supabaseClient";
 
@@ -207,7 +207,7 @@ export default function HomePage() {
   const weekStart = useMemo(() => startOfWeekMonday(new Date()), []);
   const weekEnd = useMemo(() => endOfWeekSunday(new Date()), []);
 
-  // ---- account getters (ВАЖНО: под твою схему Supabase) ----
+  // ---- account getters ----
   const getAccountNum = (a: any) =>
     String(pick(a, ["account_number", "account_num", "account_number", "number", "acc_num"], "") || "").trim();
 
@@ -220,14 +220,14 @@ export default function HomePage() {
   const getPhaseRaw = (a: any) => pick(a, ["phase", "stage"], "");
   const getPhase = (a: any) => normalizePhase(getPhaseRaw(a));
 
-  // ✅ ТВОИ КОЛОНКИ:
+  // ✅ твои колонки:
   // max_drawdown_percent
   const getMaxDDPct = (a: any) =>
     normalizePctMaybe(
       pick(
         a,
         [
-          "max_drawdown_percent", // ✅ твое
+          "max_drawdown_percent",
           "max_drawdown",
           "max_drawdown_pct",
           "max_dd",
@@ -251,7 +251,7 @@ export default function HomePage() {
       pick(
         a,
         [
-          "profit_target_percent", // ✅ твое
+          "profit_target_percent",
           "profit_target",
           "profit_target_pct",
           "target",
@@ -307,10 +307,7 @@ export default function HomePage() {
     } catch {}
 
     // accounts
-    const { data: acc, error: accErr } = await supabase
-      .from("accounts")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const { data: acc, error: accErr } = await supabase.from("accounts").select("*").order("created_at", { ascending: false });
 
     if (accErr) {
       console.log("ACCOUNTS ERROR:", accErr);
@@ -527,8 +524,8 @@ export default function HomePage() {
       const ranked = arr.filter((x) => x.wr >= 0);
       if (ranked.length === 0) return { best: null as GroupAgg | null, worst: null as GroupAgg | null };
 
-      const best = [...ranked].sort((a, b) => (b.wr - a.wr) || (b.count - a.count))[0];
-      const worst = [...ranked].sort((a, b) => (a.wr - b.wr) || (b.count - a.count))[0];
+      const best = [...ranked].sort((a, b) => b.wr - a.wr || b.count - a.count)[0];
+      const worst = [...ranked].sort((a, b) => a.wr - b.wr || b.count - a.count)[0];
 
       return { best, worst };
     }
@@ -640,23 +637,86 @@ export default function HomePage() {
     );
   }
 
+  // ✅ Премиум-первый экран для НЕавторизованных
   if (!isAuthed) {
     return (
-      <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-sm border">
-          <h1 className="text-2xl font-bold text-gray-900">Trade Journal</h1>
-          <p className="mt-2 text-gray-600">Войди в аккаунт, чтобы видеть аналитику по счетам и сделкам.</p>
-          <Link
-            href="/login"
-            className="mt-6 inline-flex w-full items-center justify-center rounded-xl bg-black px-4 py-3 text-white font-semibold hover:opacity-90"
-          >
-            Войти
-          </Link>
+      <main className="min-h-screen bg-[#0B0D12] text-white">
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute -top-40 left-1/2 h-[520px] w-[520px] -translate-x-1/2 rounded-full bg-white/10 blur-3xl" />
+          <div className="absolute bottom-0 left-0 h-[420px] w-[420px] rounded-full bg-white/5 blur-3xl" />
+          <div className="absolute top-0 right-0 h-[420px] w-[420px] rounded-full bg-white/5 blur-3xl" />
         </div>
+
+        <section className="relative mx-auto flex min-h-screen max-w-6xl items-center px-6 py-14">
+          <div className="grid w-full grid-cols-1 gap-10 lg:grid-cols-2 lg:items-center">
+            <div className="max-w-xl">
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/80">
+                <span className="h-1.5 w-1.5 rounded-full bg-white/70" />
+                Trade Journal
+              </div>
+
+              <h1 className="mt-5 text-3xl font-extrabold leading-tight tracking-tight sm:text-4xl">
+                Журнал сделок — твое зеркало трейдера
+              </h1>
+
+              <p className="mt-4 text-white/80">
+                Пока ты не фиксируешь сделки — ты не торгуешь системно. Журнал превращает хаос эмоций в данные, ошибки —
+                в уроки, а сделки — в статистику. Он показывает правду без оправданий. Именно там рождается дисциплина и
+                растёт капитал.
+              </p>
+
+              <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5">
+                <p className="text-sm text-white/90">«Каждый трейдер получает от рынка то, что заслуживает.»</p>
+                <p className="mt-2 text-xs text-white/60">— Александр Элдер</p>
+              </div>
+
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                <Link
+                  href="/login"
+                  className="inline-flex items-center justify-center rounded-2xl bg-white px-5 py-3 font-semibold text-black hover:opacity-90"
+                >
+                  Войти
+                </Link>
+                <Link
+                  href="/register"
+                  className="inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/5 px-5 py-3 font-semibold text-white hover:bg-white/10"
+                >
+                  Зарегистрироваться
+                </Link>
+              </div>
+
+              <p className="mt-4 text-xs text-white/60">
+                Подзаголовок: <span className="text-white/80">Войди в систему. Управляй процессом. Улучшай результат.</span>
+              </p>
+            </div>
+
+            <div className="lg:justify-self-end">
+              <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/5 p-6 shadow-[0_30px_80px_-35px_rgba(0,0,0,0.8)]">
+                <div className="text-sm font-semibold text-white/90">Trade Journal</div>
+                <div className="mt-1 text-xs text-white/60">Войдите в аккаунт, чтобы открыть аналитику.</div>
+
+                <Link
+                  href="/login"
+                  className="mt-5 inline-flex w-full items-center justify-center rounded-2xl bg-white px-4 py-3 font-semibold text-black hover:opacity-90"
+                >
+                  Перейти к входу
+                </Link>
+
+                <div className="mt-4 text-center text-xs text-white/60">
+                  Нет аккаунта?{" "}
+                  <Link href="/register" className="text-white underline underline-offset-4">
+                    Зарегистрироваться
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
     );
   }
 
+  // ✅ Авторизованная часть
   return (
     <main className="min-h-screen bg-gray-50">
       <header className="mx-auto max-w-6xl px-6 pt-10 pb-6">
@@ -678,16 +738,19 @@ export default function HomePage() {
             <Link href="/accounts" className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50">
               Счета
             </Link>
+
             <Link
-  href="/backtest"
-  className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50"
-  title="Отдельный режим: не влияет на основные счета и сделки"
->
-  Режим бэкТеста
-</Link>
+              href="/backtest"
+              className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50"
+              title="Отдельный режим: не влияет на основные счета и сделки"
+            >
+              Режим бэкТеста
+            </Link>
+
             <Link href="/profile" className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50">
               Профиль
             </Link>
+
             <button
               onClick={async () => {
                 await supabase.auth.signOut();
@@ -701,406 +764,448 @@ export default function HomePage() {
         </div>
       </header>
 
-      <section className="mx-auto max-w-6xl px-6 pb-10">
-        {errMsg ? (
-          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{errMsg}</div>
-        ) : null}
-
-        {/* ACCOUNTS */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
-          <Card title="Всего счетов">
-            <div className="text-3xl font-bold text-gray-900">{accStats.total}</div>
-            <div className="mt-2 text-xs text-gray-600">
-              Фаза1: {accStats.phase1} • Фаза2: {accStats.phase2} • Лайв: {accStats.live}
+      {/* ✅ Онбординг: если новый пользователь (нет счетов) */}
+      {accounts.length === 0 ? (
+        <section className="mx-auto max-w-6xl px-6 pb-10">
+          <div className="relative overflow-hidden rounded-3xl border bg-white p-8 shadow-sm">
+            <div className="pointer-events-none absolute inset-0">
+              <div className="absolute -top-28 -left-28 h-72 w-72 rounded-full bg-gray-100 blur-3xl" />
+              <div className="absolute -bottom-28 -right-28 h-72 w-72 rounded-full bg-gray-100 blur-3xl" />
             </div>
-          </Card>
 
-          <Card title="Аллокация" className="md:col-span-2">
-            <div className="flex items-center gap-4">
-              <div className="relative h-20 w-20 rounded-full" style={donutStyle(allocation.p1, allocation.p2, allocation.lv)} />
-              <div className="text-sm">
-                <div className="font-semibold text-gray-900">{fmtUsd(allocation.total)}</div>
-                <div className="mt-2 space-y-1 text-xs text-gray-700">
-                  <LegendDot color={C_PHASE1} label="Фаза 1" value={fmtUsd(allocation.p1)} />
-                  <LegendDot color={C_PHASE2} label="Фаза 2" value={fmtUsd(allocation.p2)} />
-                  <LegendDot color={C_LIVE} label="Лайв" value={fmtUsd(allocation.lv)} />
+            <div className="relative flex flex-col gap-8 md:flex-row md:items-center md:justify-between">
+              <div className="max-w-2xl">
+                <div className="inline-flex items-center gap-2 rounded-full border bg-gray-50 px-3 py-1 text-xs font-semibold text-gray-700">
+                  Старт
+                </div>
+                <h2 className="mt-4 text-2xl font-extrabold tracking-tight text-gray-900 md:text-3xl">
+                  Добавь первый счёт — и журнал начнёт считать статистику
+                </h2>
+                <p className="mt-3 text-gray-600">
+                  Пока счетов нет, главная пустая. Добавь счёт (фаза/лайв, размер, DD, таргет) — после этого появятся
+                  аналитика, календарь и прогресс.
+                </p>
+
+                <div className="mt-4 flex flex-wrap gap-2 text-sm text-gray-700">
+                  <span className="rounded-full border bg-white px-3 py-1">Фаза / Лайв</span>
+                  <span className="rounded-full border bg-white px-3 py-1">Размер</span>
+                  <span className="rounded-full border bg-white px-3 py-1">Max DD %</span>
+                  <span className="rounded-full border bg-white px-3 py-1">Profit Target %</span>
                 </div>
               </div>
-            </div>
-          </Card>
 
-          <Card title="Текущий баланс (все)">
-            <div className="text-2xl font-bold text-gray-900">{fmtUsd(accStats.totalBalance)}</div>
-            <div className="mt-2 text-xs text-gray-600">Сумма балансов всех счетов</div>
-          </Card>
+              <div className="flex w-full max-w-sm flex-col gap-3">
+                {/* если у тебя есть /accounts/new — оставь эту кнопку. Если нет — она всё равно не ломает, просто 404. */}
+                <Link
+                  href="/accounts/new"
+                  className="inline-flex items-center justify-center rounded-2xl bg-black px-5 py-3 font-semibold text-white hover:opacity-90"
+                >
+                  + Добавить счёт
+                </Link>
 
-          <Card title="Готово на выплату (лайвы)">
-            <div className="text-2xl font-bold text-gray-900">{fmtUsd(accStats.payoutReady)}</div>
-            <div className="mt-2 text-xs text-gray-600">Сумма профита на лайвах, если профит ≥ 1%</div>
-          </Card>
-        </div>
+                {/* безопасный вариант — точно существует */}
+                <Link
+                  href="/accounts"
+                  className="inline-flex items-center justify-center rounded-2xl border bg-white px-5 py-3 font-semibold text-gray-900 hover:bg-gray-50"
+                >
+                  Перейти в счета
+                </Link>
 
-        {/* DD / PASS */}
-        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Box title="Ближе всего к лимиту (DD) — по %">
-            {accStats.ddTop.length === 0 ? (
-              <div className="text-sm text-gray-500">
-                Нет данных (проверь, что max_drawdown_percent заполнен в accounts)
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {accStats.ddTop.map((x: any) => {
-                  const a = x.a;
-                  const ph = getPhase(a);
-                  const phLabel = PHASE_LABEL[ph] || String(getPhaseRaw(a) || "—");
-                  const size = getSize(a);
-                  const bal = getBalance(a);
-
-                  const remPct = clamp(toNum(x.remainingPct), 0, 999);
-                  const rem$ = toNum(x.remaining$);
-
-                  const badge =
-                    remPct <= 1
-                      ? "bg-red-50 text-red-700 border-red-200"
-                      : remPct <= 3
-                      ? "bg-orange-50 text-orange-700 border-orange-200"
-                      : "bg-gray-50 text-gray-700 border-gray-200";
-
-                  return (
-                    <MiniRow key={String(pick(a, ["id"], ""))}>
-                      <div className="font-semibold text-gray-900">{getAccountLabel(a)}</div>
-                      <div className="mt-1 text-xs text-gray-500">
-                        Этап: {phLabel} • Размер: {fmtUsd(size)} • Баланс: {fmtUsd(bal)}
-                      </div>
-
-                      <div className="mt-2 flex items-center justify-between">
-                        <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${badge}`}>
-                          Осталось: {remPct.toFixed(2)}% • {fmtUsd(rem$)}
-                        </span>
-                      </div>
-                    </MiniRow>
-                  );
-                })}
-              </div>
-            )}
-          </Box>
-
-          <Box title="Ближе всего к прохождению (PASS) — по %">
-            {accStats.passTop.length === 0 ? (
-              <div className="text-sm text-gray-500">
-                Нет данных (проверь, что profit_target_percent заполнен в accounts)
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {accStats.passTop.map((x: any) => {
-                  const a = x.a;
-                  const ph = getPhase(a);
-                  const phLabel = PHASE_LABEL[ph] || String(getPhaseRaw(a) || "—");
-                  const bal = getBalance(a);
-                  const targetPct = getProfitTargetPct(a);
-
-                  const remPct = clamp(toNum(x.remainingPct), 0, 999);
-                  const rem$ = toNum(x.remaining$);
-
-                  const badge =
-                    remPct <= 1
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                      : remPct <= 3
-                      ? "bg-blue-50 text-blue-700 border-blue-200"
-                      : "bg-gray-50 text-gray-700 border-gray-200";
-
-                  return (
-                    <MiniRow key={String(pick(a, ["id"], ""))}>
-                      <div className="font-semibold text-gray-900">{getAccountLabel(a)}</div>
-                      <div className="mt-1 text-xs text-gray-500">
-                        Этап: {phLabel} • Цель: {targetPct}% • Баланс: {fmtUsd(bal)}
-                      </div>
-
-                      <div className="mt-2 flex items-center justify-between">
-                        <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${badge}`}>
-                          Осталось: {remPct.toFixed(2)}% • {fmtUsd(rem$)}
-                        </span>
-                      </div>
-                    </MiniRow>
-                  );
-                })}
-              </div>
-            )}
-          </Box>
-        </div>
-
-        {/* TRADES ANALYTICS */}
-        <div className="mt-6 rounded-2xl bg-white p-6 shadow-sm border">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div>
-              <div className="text-lg font-semibold text-gray-900">Аналитика по сделкам</div>
-              <div className="mt-1 text-xs text-gray-500">
-                Месяц: {tradeStats.monthLabel} • Неделя: {tradeStats.ws} — {tradeStats.we}
+                <p className="text-center text-xs text-gray-500">После добавления счёта главная станет дашбордом.</p>
               </div>
             </div>
+          </div>
+        </section>
+      ) : (
+        <section className="mx-auto max-w-6xl px-6 pb-10">
+          {errMsg ? (
+            <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{errMsg}</div>
+          ) : null}
 
-            <Link
-              href="/trades"
-              className="inline-flex items-center justify-center rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50"
-            >
-              Перейти в журнал сделок
-            </Link>
+          {/* ACCOUNTS */}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+            <Card title="Всего счетов">
+              <div className="text-3xl font-bold text-gray-900">{accStats.total}</div>
+              <div className="mt-2 text-xs text-gray-600">
+                Фаза1: {accStats.phase1} • Фаза2: {accStats.phase2} • Лайв: {accStats.live}
+              </div>
+            </Card>
+
+            <Card title="Аллокация" className="md:col-span-2">
+              <div className="flex items-center gap-4">
+                <div className="relative h-20 w-20 rounded-full" style={donutStyle(allocation.p1, allocation.p2, allocation.lv)} />
+                <div className="text-sm">
+                  <div className="font-semibold text-gray-900">{fmtUsd(allocation.total)}</div>
+                  <div className="mt-2 space-y-1 text-xs text-gray-700">
+                    <LegendDot color={C_PHASE1} label="Фаза 1" value={fmtUsd(allocation.p1)} />
+                    <LegendDot color={C_PHASE2} label="Фаза 2" value={fmtUsd(allocation.p2)} />
+                    <LegendDot color={C_LIVE} label="Лайв" value={fmtUsd(allocation.lv)} />
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            <Card title="Текущий баланс (все)">
+              <div className="text-2xl font-bold text-gray-900">{fmtUsd(accStats.totalBalance)}</div>
+              <div className="mt-2 text-xs text-gray-600">Сумма балансов всех счетов</div>
+            </Card>
+
+            <Card title="Готово на выплату (лайвы)">
+              <div className="text-2xl font-bold text-gray-900">{fmtUsd(accStats.payoutReady)}</div>
+              <div className="mt-2 text-xs text-gray-600">Сумма профита на лайвах, если профит ≥ 1%</div>
+            </Card>
           </div>
 
-          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-4">
-            <CardSm title="Сделок за месяц">
-              <div className="text-2xl font-bold text-gray-900">{tradeStats.monthCount}</div>
-            </CardSm>
-
-            <CardSm title="Сделок за неделю">
-              <div className="text-2xl font-bold text-gray-900">{tradeStats.weekCount}</div>
-            </CardSm>
-
-            <CardSm title="WinRate (месяц)">
-              <div className="text-2xl font-bold text-gray-900">{tradeStats.wrMonth.pct.toFixed(0)}%</div>
-              <div className="mt-1 text-xs text-gray-600">
-                W:{tradeStats.wrMonth.wins} / L:{tradeStats.wrMonth.losses} (без БУ)
-              </div>
-            </CardSm>
-
-            <CardSm title="WinRate (неделя)">
-              <div className="text-2xl font-bold text-gray-900">{tradeStats.wrWeek.pct.toFixed(0)}%</div>
-              <div className="mt-1 text-xs text-gray-600">
-                W:{tradeStats.wrWeek.wins} / L:{tradeStats.wrWeek.losses} (без БУ)
-              </div>
-            </CardSm>
-          </div>
-
-          <div className="mt-4 rounded-xl border bg-gray-50 p-4">
-            <div className="text-sm font-semibold text-gray-900">Серия (последние 5 сделок)</div>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              {tradeStats.streak.length === 0 ? (
-                <div className="text-sm text-gray-500">Нет сделок</div>
+          {/* DD / PASS */}
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Box title="Ближе всего к лимиту (DD) — по %">
+              {accStats.ddTop.length === 0 ? (
+                <div className="text-sm text-gray-500">Нет данных (проверь, что max_drawdown_percent заполнен в accounts)</div>
               ) : (
-                tradeStats.streak.map((x, idx) => (
-                  <span
-                    key={idx}
-                    className={`inline-flex items-center justify-center rounded-full border px-3 py-1 text-sm font-semibold ${x.cls}`}
+                <div className="space-y-3">
+                  {accStats.ddTop.map((x: any) => {
+                    const a = x.a;
+                    const ph = getPhase(a);
+                    const phLabel = PHASE_LABEL[ph] || String(getPhaseRaw(a) || "—");
+                    const size = getSize(a);
+                    const bal = getBalance(a);
+
+                    const remPct = clamp(toNum(x.remainingPct), 0, 999);
+                    const rem$ = toNum(x.remaining$);
+
+                    const badge =
+                      remPct <= 1
+                        ? "bg-red-50 text-red-700 border-red-200"
+                        : remPct <= 3
+                        ? "bg-orange-50 text-orange-700 border-orange-200"
+                        : "bg-gray-50 text-gray-700 border-gray-200";
+
+                    return (
+                      <MiniRow key={String(pick(a, ["id"], ""))}>
+                        <div className="font-semibold text-gray-900">{getAccountLabel(a)}</div>
+                        <div className="mt-1 text-xs text-gray-500">
+                          Этап: {phLabel} • Размер: {fmtUsd(size)} • Баланс: {fmtUsd(bal)}
+                        </div>
+
+                        <div className="mt-2 flex items-center justify-between">
+                          <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${badge}`}>
+                            Осталось: {remPct.toFixed(2)}% • {fmtUsd(rem$)}
+                          </span>
+                        </div>
+                      </MiniRow>
+                    );
+                  })}
+                </div>
+              )}
+            </Box>
+
+            <Box title="Ближе всего к прохождению (PASS) — по %">
+              {accStats.passTop.length === 0 ? (
+                <div className="text-sm text-gray-500">Нет данных (проверь, что profit_target_percent заполнен в accounts)</div>
+              ) : (
+                <div className="space-y-3">
+                  {accStats.passTop.map((x: any) => {
+                    const a = x.a;
+                    const ph = getPhase(a);
+                    const phLabel = PHASE_LABEL[ph] || String(getPhaseRaw(a) || "—");
+                    const bal = getBalance(a);
+                    const targetPct = getProfitTargetPct(a);
+
+                    const remPct = clamp(toNum(x.remainingPct), 0, 999);
+                    const rem$ = toNum(x.remaining$);
+
+                    const badge =
+                      remPct <= 1
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        : remPct <= 3
+                        ? "bg-blue-50 text-blue-700 border-blue-200"
+                        : "bg-gray-50 text-gray-700 border-gray-200";
+
+                    return (
+                      <MiniRow key={String(pick(a, ["id"], ""))}>
+                        <div className="font-semibold text-gray-900">{getAccountLabel(a)}</div>
+                        <div className="mt-1 text-xs text-gray-500">
+                          Этап: {phLabel} • Цель: {targetPct}% • Баланс: {fmtUsd(bal)}
+                        </div>
+
+                        <div className="mt-2 flex items-center justify-between">
+                          <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${badge}`}>
+                            Осталось: {remPct.toFixed(2)}% • {fmtUsd(rem$)}
+                          </span>
+                        </div>
+                      </MiniRow>
+                    );
+                  })}
+                </div>
+              )}
+            </Box>
+          </div>
+
+          {/* TRADES ANALYTICS */}
+          <div className="mt-6 rounded-2xl bg-white p-6 shadow-sm border">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="text-lg font-semibold text-gray-900">Аналитика по сделкам</div>
+                <div className="mt-1 text-xs text-gray-500">
+                  Месяц: {tradeStats.monthLabel} • Неделя: {tradeStats.ws} — {tradeStats.we}
+                </div>
+              </div>
+
+              <Link
+                href="/trades"
+                className="inline-flex items-center justify-center rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50"
+              >
+                Перейти в журнал сделок
+              </Link>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-4">
+              <CardSm title="Сделок за месяц">
+                <div className="text-2xl font-bold text-gray-900">{tradeStats.monthCount}</div>
+              </CardSm>
+
+              <CardSm title="Сделок за неделю">
+                <div className="text-2xl font-bold text-gray-900">{tradeStats.weekCount}</div>
+              </CardSm>
+
+              <CardSm title="WinRate (месяц)">
+                <div className="text-2xl font-bold text-gray-900">{tradeStats.wrMonth.pct.toFixed(0)}%</div>
+                <div className="mt-1 text-xs text-gray-600">
+                  W:{tradeStats.wrMonth.wins} / L:{tradeStats.wrMonth.losses} (без БУ)
+                </div>
+              </CardSm>
+
+              <CardSm title="WinRate (неделя)">
+                <div className="text-2xl font-bold text-gray-900">{tradeStats.wrWeek.pct.toFixed(0)}%</div>
+                <div className="mt-1 text-xs text-gray-600">
+                  W:{tradeStats.wrWeek.wins} / L:{tradeStats.wrWeek.losses} (без БУ)
+                </div>
+              </CardSm>
+            </div>
+
+            <div className="mt-4 rounded-xl border bg-gray-50 p-4">
+              <div className="text-sm font-semibold text-gray-900">Серия (последние 5 сделок)</div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {tradeStats.streak.length === 0 ? (
+                  <div className="text-sm text-gray-500">Нет сделок</div>
+                ) : (
+                  tradeStats.streak.map((x, idx) => (
+                    <span
+                      key={idx}
+                      className={`inline-flex items-center justify-center rounded-full border px-3 py-1 text-sm font-semibold ${x.cls}`}
+                    >
+                      {x.t}
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+              <PerfCardOutcomes title="Сетапы" best={tradeStats.bestSetup} worst={tradeStats.worstSetup} />
+              <PerfCardOutcomes title="Активы" best={tradeStats.bestAsset} worst={tradeStats.worstAsset} />
+              <PerfCardOutcomes title="Килл зоны" best={tradeStats.bestKillzone} worst={tradeStats.worstKillzone} />
+            </div>
+          </div>
+
+          {/* CALENDAR */}
+          <div className="mt-6 rounded-2xl bg-white p-6 shadow-sm border">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="text-lg font-semibold text-gray-900">Календарь сделок</div>
+                <div className="mt-1 text-xs text-gray-500">Нажми на день — покажет все сделки за этот день</div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const d = new Date(calCursor);
+                    d.setMonth(d.getMonth() - 1);
+                    setCalCursor(d);
+                    setSelectedDay(null);
+                  }}
+                  className="rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-gray-50"
+                >
+                  ←
+                </button>
+                <div className="rounded-xl border bg-white px-4 py-2 text-sm font-semibold">
+                  {calCursor.toLocaleString("ru-RU", { month: "long", year: "numeric" })}
+                </div>
+                <button
+                  onClick={() => {
+                    const d = new Date(calCursor);
+                    d.setMonth(d.getMonth() + 1);
+                    setCalCursor(d);
+                    setSelectedDay(null);
+                  }}
+                  className="rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-gray-50"
+                >
+                  →
+                </button>
+
+                <button
+                  onClick={() => {
+                    setCalCursor(new Date());
+                    setSelectedDay(null);
+                  }}
+                  className="rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-gray-50"
+                >
+                  Сегодня
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-7 gap-2 text-center text-xs text-gray-600">
+              {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((x) => (
+                <div key={x} className="py-1 font-semibold">
+                  {x}
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-2 grid grid-cols-7 gap-2">
+              {calDays.map((d) => {
+                const sum = pnlByDay.get(d.key) || 0;
+                const inMonth = d.inMonth;
+                const isSel = selectedDay === d.key;
+
+                const dot = sum > 0 ? "bg-green-500" : sum < 0 ? "bg-red-500" : "bg-gray-300";
+                const ring = isSel ? "ring-2 ring-black" : "ring-1 ring-gray-200";
+
+                return (
+                  <button
+                    key={d.key}
+                    onClick={() => setSelectedDay(d.key)}
+                    className={`rounded-xl border bg-white p-2 text-left hover:bg-gray-50 ${inMonth ? "" : "opacity-40"}`}
                   >
-                    {x.t}
-                  </span>
-                ))
+                    <div className="flex items-center justify-between">
+                      <div className={`h-2 w-2 rounded-full ${dot}`} />
+                      <div className={`h-8 w-8 rounded-full flex items-center justify-center text-sm font-semibold ${ring}`}>
+                        {d.date.getDate()}
+                      </div>
+                    </div>
+
+                    <div className={`mt-2 text-xs font-semibold ${sum > 0 ? "text-green-700" : sum < 0 ? "text-red-700" : "text-gray-600"}`}>
+                      {sum === 0 ? "0" : fmtUsd(sum)}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-5 border-t pt-5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold text-gray-900">{selectedDay ? `Сделки за ${selectedDay}` : "Выбери день в календаре"}</div>
+                {selectedDay ? (
+                  <Link href="/trades" className="rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-gray-50">
+                    Открыть журнал
+                  </Link>
+                ) : null}
+              </div>
+
+              {!selectedDay ? (
+                <div className="mt-2 text-sm text-gray-500">Нажми на любой день, чтобы увидеть сделки этого дня.</div>
+              ) : tradesForSelectedDay.length === 0 ? (
+                <div className="mt-2 text-sm text-gray-500">В этот день сделок нет.</div>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {tradesForSelectedDay.map((t) => {
+                    const pnl = toNum(t.pnl_money);
+                    const pnlClass = pnl > 0 ? "text-green-700" : pnl < 0 ? "text-red-700" : "text-gray-700";
+
+                    const o = outcomeChip(String(t.outcome || ""));
+                    const outRu = OUTCOMES_RU[String(t.outcome || "")] || String(t.outcome || "");
+
+                    const kzRu = KILLZONES[String(t.killzone || "")] || String(t.killzone || "");
+                    const dirRu = DIRECTIONS[String(t.direction || "")] || String(t.direction || "");
+                    const mpRu = MARKET_PHASES[String(t.market_phase || "")] || String(t.market_phase || "");
+
+                    const risk = toNum(t.risk_pct);
+                    const rr = toNum(t.rr);
+
+                    const acc = accountMap.get(String(t.account_id));
+                    const accLabel = acc ? getAccountLabel(acc) : "Счёт";
+
+                    const setup = String(t.setup || "").trim();
+                    const comment = String(t.comment || "").trim();
+
+                    const htf = String(t.htf_screenshot_url || "").trim();
+                    const ltf = String(t.ltf_screenshot_url || "").trim();
+
+                    return (
+                      <div key={t.id} className="rounded-xl border bg-white p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold text-gray-900">
+                              {(t.asset || "—").toUpperCase()} • {dayRu(toNum(t.day_of_week))}
+                            </div>
+
+                            <div className="mt-1 text-xs text-gray-500">
+                              {accLabel}
+                              {kzRu ? ` • ${kzRu}` : ""}
+                              {dirRu ? ` • ${dirRu}` : ""}
+                              {mpRu ? ` • ${mpRu}` : ""}
+                              {Number.isFinite(risk) && risk ? ` • Риск ${risk.toFixed(2)}%` : ""}
+                              {Number.isFinite(rr) && rr ? ` • RR ${rr.toFixed(2)}` : ""}
+                              {outRu ? ` • ${outRu}` : ""}
+                            </div>
+
+                            {setup ? (
+                              <div className="mt-2 text-xs">
+                                <span className="font-semibold text-gray-700">Сетап:</span>{" "}
+                                <span className="text-gray-700">{setup}</span>
+                              </div>
+                            ) : null}
+                          </div>
+
+                          <div className="flex flex-col items-end gap-2">
+                            <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${o.cls}`}>{o.t}</span>
+                            <div className={`text-sm font-bold ${pnlClass}`}>{fmtUsd(pnl)}</div>
+                          </div>
+                        </div>
+
+                        {htf || ltf ? (
+                          <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                            {htf ? (
+                              <a
+                                href={htf}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="rounded-lg border bg-white px-2 py-1 hover:bg-gray-50"
+                              >
+                                Скрин ХТФ
+                              </a>
+                            ) : null}
+                            {ltf ? (
+                              <a
+                                href={ltf}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="rounded-lg border bg-white px-2 py-1 hover:bg-gray-50"
+                              >
+                                Скрин ЛТФ
+                              </a>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {comment ? <div className="mt-2 text-sm text-gray-700 whitespace-pre-wrap">{comment}</div> : null}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
-            <PerfCardOutcomes title="Сетапы" best={tradeStats.bestSetup} worst={tradeStats.worstSetup} />
-            <PerfCardOutcomes title="Активы" best={tradeStats.bestAsset} worst={tradeStats.worstAsset} />
-            <PerfCardOutcomes title="Килл зоны" best={tradeStats.bestKillzone} worst={tradeStats.worstKillzone} />
+          <div className="mt-4 text-center text-xs text-gray-500">
+            Таблица счетов доступна на странице{" "}
+            <Link href="/accounts" className="underline">
+              Счета
+            </Link>
           </div>
-        </div>
-
-        {/* CALENDAR */}
-        <div className="mt-6 rounded-2xl bg-white p-6 shadow-sm border">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <div className="text-lg font-semibold text-gray-900">Календарь сделок</div>
-              <div className="mt-1 text-xs text-gray-500">Нажми на день — покажет все сделки за этот день</div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  const d = new Date(calCursor);
-                  d.setMonth(d.getMonth() - 1);
-                  setCalCursor(d);
-                  setSelectedDay(null);
-                }}
-                className="rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-gray-50"
-              >
-                ←
-              </button>
-              <div className="rounded-xl border bg-white px-4 py-2 text-sm font-semibold">
-                {calCursor.toLocaleString("ru-RU", { month: "long", year: "numeric" })}
-              </div>
-              <button
-                onClick={() => {
-                  const d = new Date(calCursor);
-                  d.setMonth(d.getMonth() + 1);
-                  setCalCursor(d);
-                  setSelectedDay(null);
-                }}
-                className="rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-gray-50"
-              >
-                →
-              </button>
-
-              <button
-                onClick={() => {
-                  setCalCursor(new Date());
-                  setSelectedDay(null);
-                }}
-                className="rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-gray-50"
-              >
-                Сегодня
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-4 grid grid-cols-7 gap-2 text-center text-xs text-gray-600">
-            {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((x) => (
-              <div key={x} className="py-1 font-semibold">
-                {x}
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-2 grid grid-cols-7 gap-2">
-            {calDays.map((d) => {
-              const sum = pnlByDay.get(d.key) || 0;
-              const inMonth = d.inMonth;
-              const isSel = selectedDay === d.key;
-
-              const dot = sum > 0 ? "bg-green-500" : sum < 0 ? "bg-red-500" : "bg-gray-300";
-              const ring = isSel ? "ring-2 ring-black" : "ring-1 ring-gray-200";
-
-              return (
-                <button
-                  key={d.key}
-                  onClick={() => setSelectedDay(d.key)}
-                  className={`rounded-xl border bg-white p-2 text-left hover:bg-gray-50 ${inMonth ? "" : "opacity-40"}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className={`h-2 w-2 rounded-full ${dot}`} />
-                    <div className={`h-8 w-8 rounded-full flex items-center justify-center text-sm font-semibold ${ring}`}>
-                      {d.date.getDate()}
-                    </div>
-                  </div>
-
-                  <div
-                    className={`mt-2 text-xs font-semibold ${
-                      sum > 0 ? "text-green-700" : sum < 0 ? "text-red-700" : "text-gray-600"
-                    }`}
-                  >
-                    {sum === 0 ? "0" : fmtUsd(sum)}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="mt-5 border-t pt-5">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-semibold text-gray-900">
-                {selectedDay ? `Сделки за ${selectedDay}` : "Выбери день в календаре"}
-              </div>
-              {selectedDay ? (
-                <Link href="/trades" className="rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-gray-50">
-                  Открыть журнал
-                </Link>
-              ) : null}
-            </div>
-
-            {!selectedDay ? (
-              <div className="mt-2 text-sm text-gray-500">Нажми на любой день, чтобы увидеть сделки этого дня.</div>
-            ) : tradesForSelectedDay.length === 0 ? (
-              <div className="mt-2 text-sm text-gray-500">В этот день сделок нет.</div>
-            ) : (
-              <div className="mt-3 space-y-2">
-                {tradesForSelectedDay.map((t) => {
-                  const pnl = toNum(t.pnl_money);
-                  const pnlClass = pnl > 0 ? "text-green-700" : pnl < 0 ? "text-red-700" : "text-gray-700";
-
-                  const o = outcomeChip(String(t.outcome || ""));
-                  const outRu = OUTCOMES_RU[String(t.outcome || "")] || String(t.outcome || "");
-
-                  const kzRu = KILLZONES[String(t.killzone || "")] || String(t.killzone || "");
-                  const dirRu = DIRECTIONS[String(t.direction || "")] || String(t.direction || "");
-                  const mpRu = MARKET_PHASES[String(t.market_phase || "")] || String(t.market_phase || "");
-
-                  const risk = toNum(t.risk_pct);
-                  const rr = toNum(t.rr);
-
-                  const acc = accountMap.get(String(t.account_id));
-                  const accLabel = acc ? getAccountLabel(acc) : "Счёт";
-
-                  const setup = String(t.setup || "").trim();
-                  const comment = String(t.comment || "").trim();
-
-                  const htf = String(t.htf_screenshot_url || "").trim();
-                  const ltf = String(t.ltf_screenshot_url || "").trim();
-
-                  return (
-                    <div key={t.id} className="rounded-xl border bg-white p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-semibold text-gray-900">
-                            {(t.asset || "—").toUpperCase()} • {dayRu(toNum(t.day_of_week))}
-                          </div>
-
-                          <div className="mt-1 text-xs text-gray-500">
-                            {accLabel}
-                            {kzRu ? ` • ${kzRu}` : ""}
-                            {dirRu ? ` • ${dirRu}` : ""}
-                            {mpRu ? ` • ${mpRu}` : ""}
-                            {Number.isFinite(risk) && risk ? ` • Риск ${risk.toFixed(2)}%` : ""}
-                            {Number.isFinite(rr) && rr ? ` • RR ${rr.toFixed(2)}` : ""}
-                            {outRu ? ` • ${outRu}` : ""}
-                          </div>
-
-                          {setup ? (
-                            <div className="mt-2 text-xs">
-                              <span className="font-semibold text-gray-700">Сетап:</span>{" "}
-                              <span className="text-gray-700">{setup}</span>
-                            </div>
-                          ) : null}
-                        </div>
-
-                        <div className="flex flex-col items-end gap-2">
-                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${o.cls}`}>
-                            {o.t}
-                          </span>
-                          <div className={`text-sm font-bold ${pnlClass}`}>{fmtUsd(pnl)}</div>
-                        </div>
-                      </div>
-
-                      {(htf || ltf) ? (
-                        <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                          {htf ? (
-                            <a
-                              href={htf}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="rounded-lg border bg-white px-2 py-1 hover:bg-gray-50"
-                            >
-                              Скрин ХТФ
-                            </a>
-                          ) : null}
-                          {ltf ? (
-                            <a
-                              href={ltf}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="rounded-lg border bg-white px-2 py-1 hover:bg-gray-50"
-                            >
-                              Скрин ЛТФ
-                            </a>
-                          ) : null}
-                        </div>
-                      ) : null}
-
-                      {comment ? <div className="mt-2 text-sm text-gray-700 whitespace-pre-wrap">{comment}</div> : null}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-4 text-center text-xs text-gray-500">
-          Таблица счетов доступна на странице{" "}
-          <Link href="/accounts" className="underline">
-            Счета
-          </Link>
-        </div>
-      </section>
+        </section>
+      )}
     </main>
   );
 }

@@ -1,105 +1,117 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { supabase } from "../../src/lib/supabaseClient";
+import Link from "next/link";
+import { supabase } from "@/src/lib/supabaseClient";
 
 export default function LoginPage() {
-  const router = useRouter();
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   const [loading, setLoading] = useState(false);
-  const [errorText, setErrorText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const onLogin = async (e: React.FormEvent) => {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setErrorText(null);
+    setError(null);
     setLoading(true);
 
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
       password,
     });
 
-    if (error) {
-      setLoading(false);
-      setErrorText(error.message);
-      return;
-    }
-
-    // на всякий случай: проверим, что сессия реально появилась
-    const { data: s } = await supabase.auth.getSession();
-    if (!s.session) {
-      setLoading(false);
-      setErrorText("Сессия не сохранилась. Обнови страницу и попробуй снова.");
-      return;
-    }
-
     setLoading(false);
-    router.replace("/");
-  };
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    // после логина на главную (у тебя там дашборд)
+    window.location.href = "/";
+  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-200 flex items-center justify-center p-8">
-      <div className="bg-white rounded-3xl shadow-lg p-8 w-full max-w-md">
-        <h1 className="text-2xl font-bold mb-2">Trade Journal</h1>
-        <p className="text-gray-600 mb-6">Вход в аккаунт</p>
-
-        <form onSubmit={onLogin} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Email
-            </label>
-            <input
-              className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:ring-2 focus:ring-gray-300"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="example@mail.com"
-              autoComplete="email"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Пароль
-            </label>
-            <input
-              className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:ring-2 focus:ring-gray-300"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              autoComplete="current-password"
-              required
-            />
-          </div>
-
-          {errorText ? (
-            <div className="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-3 text-sm">
-              {errorText}
+    <main className="min-h-screen bg-gradient-to-b from-gray-50 via-white to-gray-50 px-4">
+      <div className="mx-auto flex min-h-screen w-full max-w-md items-center justify-center py-10">
+        <div className="w-full">
+          {/* Brand */}
+          <div className="mb-6 flex items-center justify-center">
+            <div className="inline-flex items-center gap-3">
+              <div className="h-11 w-11 rounded-2xl bg-black text-white flex items-center justify-center font-extrabold tracking-tight">
+                TJ
+              </div>
+              <div className="leading-tight">
+                <div className="text-base font-semibold text-gray-900">Trade Journal</div>
+                <div className="text-xs text-gray-500">Вход в аккаунт</div>
+              </div>
             </div>
-          ) : null}
-
-          <button
-            className="w-full bg-black text-white rounded-xl py-3 font-semibold hover:bg-gray-900 transition disabled:opacity-60"
-            disabled={loading}
-            type="submit"
-          >
-            {loading ? "Входим..." : "Войти"}
-          </button>
-
-          <div className="text-sm text-gray-600 text-center">
-            Нет аккаунта?{" "}
-            <a className="text-black font-semibold hover:underline" href="/signup">
-              Регистрация
-            </a>
           </div>
-        </form>
+
+          {/* Card */}
+          <div className="rounded-3xl border bg-white shadow-sm">
+            <div className="p-7 sm:p-8">
+              <h1 className="text-xl font-bold text-gray-900">Войти</h1>
+              <p className="mt-1 text-sm text-gray-600">
+                Войди в систему, чтобы управлять процессом и улучшать результат.
+              </p>
+
+              {error ? (
+                <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {error}
+                </div>
+              ) : null}
+
+              <form onSubmit={onSubmit} className="mt-6 space-y-4">
+                <div>
+                  <label className="text-sm font-semibold text-gray-800">Email</label>
+                  <input
+                    type="email"
+                    inputMode="email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="mt-2 w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-[16px] text-gray-900 placeholder:text-gray-400 outline-none focus:border-gray-900 focus:ring-4 focus:ring-gray-200"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-semibold text-gray-800">Пароль</label>
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="mt-2 w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-[16px] text-gray-900 placeholder:text-gray-400 outline-none focus:border-gray-900 focus:ring-4 focus:ring-gray-200"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="inline-flex w-full items-center justify-center rounded-2xl bg-black px-4 py-3 font-semibold text-white hover:opacity-90 disabled:opacity-60"
+                >
+                  {loading ? "Входим…" : "Войти"}
+                </button>
+
+                <div className="pt-2 text-center text-sm text-gray-600">
+                  Нет аккаунта?{" "}
+                  <Link href="/register" className="font-semibold text-gray-900 underline underline-offset-4">
+                    Зарегистрироваться
+                  </Link>
+                </div>
+              </form>
+            </div>
+
+            <div className="border-t bg-gray-50 px-7 py-4 text-center text-xs text-gray-500 rounded-b-3xl">
+              © {new Date().getFullYear()} Trade Journal
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+    </main>
   );
 }
