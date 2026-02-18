@@ -90,7 +90,8 @@ export default function AddAccountPage() {
     }
 
     // ✅ переход на страницу счета
-    router.push(`/accounts/${data.id}`);
+    router.push("/accounts");
+router.refresh();
   }
 
   return (
