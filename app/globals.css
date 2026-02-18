@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
+/* =========================
+   FORCE LIGHT THEME (fix iOS dark mode ruining calendar)
+   ========================= */
 :root {
+  color-scheme: light; /* ✅ Safari iOS больше не будет навязывать dark */
   --background: #ffffff;
   --foreground: #171717;
 }
@@ -12,36 +16,32 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
+/* ✅ ОТКЛЮЧАЕМ смену переменных в dark, чтобы календарь не становился "черным" */
+/* @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
   }
-}
+} */
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
-/* =========================
-   FIX MOBILE INPUT + BUTTON TEXT
-   ========================= */
 
+/* =========================
+   FIX MOBILE INPUT TEXT (and autofill)
+   ========================= */
 input,
 textarea,
 select {
-  color: #111827 !important;        /* нормальный темный текст */
+  color: #111827 !important; /* нормальный темный текст */
   background-color: #ffffff !important;
 }
 
 ::placeholder {
-  color: #9ca3af !important;        /* серый placeholder */
-}
-
-/* чтобы кнопки не наследовали бледный цвет */
-button {
-  color: inherit;
+  color: #9ca3af !important; /* серый placeholder */
 }
 
 /* iOS autofill bug fix */
@@ -51,70 +51,66 @@ select:-webkit-autofill {
   -webkit-text-fill-color: #111827 !important;
   transition: background-color 9999s ease-in-out 0s;
 }
+
 /* =========================
-   BUTTON VISIBILITY FIX
+   BUTTON VISIBILITY FIX (DON'T KILL WHITE CARDS/LINKS)
    ========================= */
 
-button,
-.button,
-a[class*="bg-"],
-a[class*="border"] {
+/* ❌ УБРАЛИ глобальный хард-оверрайд для всех button и всех a[class*="bg-"]/border
+   Он ломал календарь (там куча кнопок-дней и ссылок с bg/border). */
+
+/* Базовый фикс для кнопок: не полупрозрачные + без iOS-стилей */
+button {
   opacity: 1 !important;
   filter: none !important;
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: 0; /* Tailwind сам задаст, но iOS иногда чудит */
 }
 
-/* основные кнопки */
-button,
-.btn-primary {
+/* ✅ Только "настоящие" тёмные primary кнопки (как у тебя Выйти/Войти) */
+button.bg-black,
+button.bg-gray-900,
+button.bg-slate-900,
+button.bg-zinc-900,
+button.bg-neutral-900,
+button.btn-primary {
   background: #111827 !important;
   color: #ffffff !important;
   border: 1px solid #111827 !important;
 }
 
-/* hover */
-button:hover,
-.btn-primary:hover {
+button.bg-black:hover,
+button.bg-gray-900:hover,
+button.bg-slate-900:hover,
+button.bg-zinc-900:hover,
+button.bg-neutral-900:hover,
+button.btn-primary:hover {
   background: #000000 !important;
   border-color: #000000 !important;
 }
 
-/* secondary */
-.btn-secondary {
+/* ✅ Secondary (если используешь класс) */
+button.btn-secondary {
   background: #ffffff !important;
   color: #111827 !important;
   border: 1px solid #d1d5db !important;
 }
 
-/* disabled */
 button:disabled {
   opacity: 0.6 !important;
 }
 
-/* iOS Safari button fix */
-button {
-  -webkit-appearance: none;
-  appearance: none;
-}
 /* =========================
    NAV BUTTONS (Links) FIX
    ========================= */
-
-/* Все "кнопки" навигации в хедере (Link-элементы) */
+/* "Счета / Режим бэкТеста / Профиль" - это ссылки, делаем контрастно */
 a.rounded-xl.border,
 a.rounded-xl.border.bg-white {
   background: #ffffff !important;
   color: #111827 !important;
   border-color: #d1d5db !important;
   opacity: 1 !important;
-}
-
-/* На мобиле сделаем текст темнее и контрастнее */
-@media (max-width: 768px) {
-  a.rounded-xl.border,
-  a.rounded-xl.border.bg-white {
-    color: #111827 !important;
-    border-color: #cbd5e1 !important;
-  }
 }
 
 /* Hover/active */
@@ -125,4 +121,25 @@ a.rounded-xl.border:hover {
 /* Чтобы текст внутри точно не становился полупрозрачным */
 a.rounded-xl.border * {
   opacity: 1 !important;
+}
+
+/* =========================
+   CALENDAR BUTTONS SAFE FIX
+   ========================= */
+/* На всякий: календарные "дни" — это button с bg-white, оставляем их белыми */
+button.bg-white {
+  background: #ffffff !important;
+  color: #111827 !important;
+  border-color: #e5e7eb !important;
+}
+
+/* =========================
+   MOBILE TWEAKS
+   ========================= */
+@media (max-width: 768px) {
+  a.rounded-xl.border,
+  a.rounded-xl.border.bg-white {
+    color: #111827 !important;
+    border-color: #cbd5e1 !important;
+  }
 }
