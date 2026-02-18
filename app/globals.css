@@ -51,3 +51,47 @@ select:-webkit-autofill {
   -webkit-text-fill-color: #111827 !important;
   transition: background-color 9999s ease-in-out 0s;
 }
+/* =========================
+   BUTTON VISIBILITY FIX
+   ========================= */
+
+button,
+.button,
+a[class*="bg-"],
+a[class*="border"] {
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+/* основные кнопки */
+button,
+.btn-primary {
+  background: #111827 !important;
+  color: #ffffff !important;
+  border: 1px solid #111827 !important;
+}
+
+/* hover */
+button:hover,
+.btn-primary:hover {
+  background: #000000 !important;
+  border-color: #000000 !important;
+}
+
+/* secondary */
+.btn-secondary {
+  background: #ffffff !important;
+  color: #111827 !important;
+  border: 1px solid #d1d5db !important;
+}
+
+/* disabled */
+button:disabled {
+  opacity: 0.6 !important;
+}
+
+/* iOS Safari button fix */
+button {
+  -webkit-appearance: none;
+  appearance: none;
+}
