@@ -96,6 +96,9 @@ export default function LoginPage() {
                 >
                   {loading ? "Входим…" : "Войти"}
                 </button>
+                <Link href="/forgot-password" className="text-sm underline text-gray-700">
+  Забыли пароль?
+</Link>
 
                 <div className="pt-2 text-center text-sm text-gray-600">
                   Нет аккаунта?{" "}
