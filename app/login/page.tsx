@@ -2,10 +2,15 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "@/src/lib/supabaseClient";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
+  const sp = useSearchParams();
+  const checkEmail = sp.get("checkEmail");
+  const emailParam = sp.get("email");
+
+  const [email, setEmail] = useState(emailParam ?? "");
   const [password, setPassword] = useState("");
 
   const [loading, setLoading] = useState(false);
@@ -28,7 +33,6 @@ export default function LoginPage() {
       return;
     }
 
-    // после логина на главную (у тебя там дашборд)
     window.location.href = "/";
   }
 
@@ -56,6 +60,15 @@ export default function LoginPage() {
               <p className="mt-1 text-sm text-gray-600">
                 Войди в систему, чтобы управлять процессом и улучшать результат.
               </p>
+
+              {/* ✅ Баннер "Проверь почту" */}
+              {checkEmail && (
+                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  Проверь почту{emailParam ? ` (${emailParam})` : ""}: мы отправили письмо для подтверждения email.
+                  <br />
+                  Если письма нет — проверь “Спам/Промоакции”.
+                </div>
+              )}
 
               {error ? (
                 <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -96,9 +109,10 @@ export default function LoginPage() {
                 >
                   {loading ? "Входим…" : "Войти"}
                 </button>
+
                 <Link href="/forgot-password" className="text-sm underline text-gray-700">
-  Забыли пароль?
-</Link>
+                  Забыли пароль?
+                </Link>
 
                 <div className="pt-2 text-center text-sm text-gray-600">
                   Нет аккаунта?{" "}
