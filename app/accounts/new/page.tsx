@@ -1,12 +1,8 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
-import type React from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
+import { supabase } from "@/src/lib/supabaseClient";
 import { useRouter } from "next/navigation";
-import { getSupabaseBrowser } from "@/src/lib/supabaseClient";
 
 type FormState = {
   account_number: string;
@@ -20,15 +16,8 @@ type FormState = {
 
 export default function AddAccountPage() {
   const router = useRouter();
-  const supabase = useMemo(() => {
-    // Создаём только после монтирования (ещё один “страховочный” слой)
-    if (typeof window === "undefined") return null;
-    return getSupabaseBrowser();
-  }, []);
 
-  const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(false);
-
   const [form, setForm] = useState<FormState>({
     account_number: "",
     firm: "",
@@ -38,10 +27,6 @@ export default function AddAccountPage() {
     max_drawdown_percent: "",
     profit_target_percent: "",
   });
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) {
     const { name, value } = e.target;
@@ -67,11 +52,6 @@ export default function AddAccountPage() {
       return;
     }
 
-    if (!supabase) {
-      alert("Ошибка инициализации. Обнови страницу.");
-      return;
-    }
-
     setLoading(true);
 
     const { data: authData, error: authErr } = await supabase.auth.getUser();
@@ -84,11 +64,11 @@ export default function AddAccountPage() {
 
     const userId = authData.user.id;
 
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from("accounts")
       .insert([
         {
-          user_id: userId,
+          user_id: userId, // важно для RLS
           account_number: form.account_number.trim(),
           firm: form.firm.trim(),
           size: Number(form.size),
@@ -97,9 +77,7 @@ export default function AddAccountPage() {
           max_drawdown_percent: Number(form.max_drawdown_percent),
           profit_target_percent: Number(form.profit_target_percent),
         },
-      ])
-      .select("id")
-      .single();
+      ]);
 
     setLoading(false);
 
@@ -113,14 +91,12 @@ export default function AddAccountPage() {
     router.refresh();
   }
 
-  // Чтобы на сервере не пытался рисовать форму (ещё один анти-prerender крюк)
-  if (!mounted) {
-    return <div className="min-h-screen bg-gray-50" />;
-  }
-
   return (
     <main className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
-      <form onSubmit={handleSubmit} className="w-full max-w-lg bg-white p-8 rounded-2xl shadow border">
+      <form
+        onSubmit={handleSubmit}
+        className="w-full max-w-lg bg-white p-8 rounded-2xl shadow border"
+      >
         <h1 className="text-2xl font-bold mb-2 text-center text-gray-900">Добавить счёт</h1>
         <p className="text-center text-sm text-gray-600 mb-6">
           Заполни данные — счёт появится в списке.
@@ -193,7 +169,10 @@ export default function AddAccountPage() {
         <div className="mt-4">
           <label className="block text-sm mb-1 text-gray-800">
             Этап{" "}
-            <span className="text-gray-400" title="Фаза 1 / Фаза 2 / Лайв">
+            <span
+              className="text-gray-400 cursor-help"
+              title="Фаза 1 / Фаза 2 / Лайв"
+            >
               ⓘ
             </span>
           </label>
