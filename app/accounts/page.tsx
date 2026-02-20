@@ -110,7 +110,9 @@ export default function AccountsPage() {
 
     const { data, error } = await supabase
       .from("accounts")
-      .select("id, account_number, firm, size, phase, balance, max_drawdown_percent, profit_target_percent, status")
+      .select(
+        "id, account_number, firm, size, phase, balance, max_drawdown_percent, profit_target_percent, status"
+      )
       .order("created_at", { ascending: true });
 
     if (error) setError(error.message);
@@ -194,6 +196,7 @@ export default function AccountsPage() {
   }
 
   // ✅ ВЫВЕСТИ ПРИБЫЛЬ: только для лайвов с профитом > 0
+  // ✅ ВАЖНО: пишет запись в public.payouts и обнуляет баланс до размера (RPC withdraw_live_profit)
   async function handleWithdrawProfit(a: Account) {
     const size = n(a.size);
     const balance = n(a.balance);
@@ -210,7 +213,9 @@ export default function AccountsPage() {
     setBusyId(a.id);
     setError("");
 
-    const { error } = await supabase.from("accounts").update({ balance: size }).eq("id", a.id);
+    const { data, error } = await supabase.rpc("withdraw_live_profit", {
+      p_account_id: a.id,
+    });
 
     setBusyId(null);
 
@@ -221,6 +226,9 @@ export default function AccountsPage() {
 
     // обновим локально, чтобы сразу было видно
     setAccounts((prev) => prev.map((x) => (x.id === a.id ? { ...x, balance: size } : x)));
+
+    // data можно не использовать, но пусть будет корректно
+    // const withdrawn = Array.isArray(data) ? Number(data?.[0]?.withdrawn ?? profit) : profit;
   }
 
   return (
@@ -363,7 +371,7 @@ export default function AccountsPage() {
 
                       {/* Actions */}
                       <div className="flex items-center gap-2 shrink-0">
-                        {/* ✅ КНОПКА "ВЫВЕСТИ ПРИБЫЛЬ" (как у тебя было): только лайв + профит > 0 */}
+                        {/* ✅ КНОПКА "ВЫВЕСТИ ПРИБЫЛЬ": только лайв + профит > 0 */}
                         {canWithdraw ? (
                           <button
                             onClick={() => handleWithdrawProfit(a)}
