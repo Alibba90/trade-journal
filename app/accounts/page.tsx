@@ -55,6 +55,7 @@ export default function AccountsPage() {
   const [errMsg, setErrMsg] = useState<string | null>(null);
 
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const getAccountNum = (a: any) =>
     String(pick(a, ["account_number", "account_num", "number", "acc_num"], "") || "").trim();
@@ -75,6 +76,7 @@ export default function AccountsPage() {
     return parts || "Счёт";
   };
 
+  // слитый: либо status=blown, либо баланс <= -10% от размера
   const isBlown = (a: any) => {
     const st = String(a?.status || "").toLowerCase().trim();
     if (st === "blown") return true;
@@ -128,6 +130,27 @@ export default function AccountsPage() {
     return { active, blown, activeSum, blownSum };
   }, [accounts]);
 
+  async function deleteAccount(accountId: string) {
+    setErrMsg(null);
+    const ok = window.confirm("Удалить этот счёт? (Сделки на этом счёте тоже удалятся, если стоит CASCADE)");
+    if (!ok) return;
+
+    try {
+      setBusyId(accountId);
+
+      const { error } = await supabase.from("accounts").delete().eq("id", accountId);
+      if (error) {
+        console.log("DELETE ACCOUNT ERROR:", error);
+        setErrMsg(error.message);
+        return;
+      }
+
+      await loadAccounts();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   if (loading) {
     return (
       <main className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -171,6 +194,7 @@ export default function AccountsPage() {
             <Link href="/" className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50">
               Главная
             </Link>
+
             <Link
               href="/accounts/new"
               className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
@@ -191,7 +215,7 @@ export default function AccountsPage() {
         <div className="rounded-2xl bg-white p-6 shadow-sm border">
           <div className="flex items-center justify-between">
             <div className="text-lg font-semibold text-gray-900">Активные счета</div>
-            <div className="text-xs text-gray-500">Сверху — активные. Внизу — слитые.</div>
+            <div className="text-xs text-gray-500">Карточки не кликаются (страницы счета пока нет)</div>
           </div>
 
           {view.active.length === 0 ? (
@@ -206,24 +230,45 @@ export default function AccountsPage() {
               {view.active.map((a) => {
                 const ph = getPhase(a);
                 const phLabel = PHASE_LABEL[ph] || String(getPhaseRaw(a) || "—");
+                const id = String(a.id);
+
                 return (
-                  <Link
-                    key={String(a.id)}
-                    href={`/accounts/${a.id}`}
-                    className="block rounded-xl border bg-white p-4 hover:bg-gray-50"
-                    title="Открыть счет"
-                  >
+                  <div key={id} className="rounded-xl border bg-white p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="font-semibold text-gray-900">{getAccountLabel(a)}</div>
                         <div className="mt-1 text-xs text-gray-500">Этап: {phLabel}</div>
+                        <div className="mt-2 text-xs text-gray-500">Детальная страница: скоро</div>
                       </div>
-                      <div className="text-right">
-                        <div className="text-sm font-semibold text-gray-900">{fmtUsd(getBalance(a))}</div>
-                        <div className="text-xs text-gray-500">Баланс</div>
+
+                      <div className="flex flex-col items-end gap-2">
+                        <div className="text-right">
+                          <div className="text-sm font-semibold text-gray-900">{fmtUsd(getBalance(a))}</div>
+                          <div className="text-xs text-gray-500">Баланс</div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {/* EDIT -> same page /accounts/new?id=... */}
+                          <Link
+                            href={`/accounts/new?id=${encodeURIComponent(id)}`}
+                            className="rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-gray-50"
+                            title="Редактировать счет"
+                          >
+                            Редактировать
+                          </Link>
+
+                          <button
+                            onClick={() => deleteAccount(id)}
+                            disabled={busyId === id}
+                            className="rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+                            title="Удалить счет"
+                          >
+                            {busyId === id ? "Удаляю…" : "Удалить"}
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </Link>
+                  </div>
                 );
               })}
             </div>
@@ -246,17 +291,14 @@ export default function AccountsPage() {
               {view.blown.map((a) => {
                 const ph = getPhase(a);
                 const phLabel = PHASE_LABEL[ph] || String(getPhaseRaw(a) || "—");
+                const id = String(a.id);
+
                 const size = getSize(a);
                 const bal = getBalance(a);
                 const ddPct = size ? ((size - bal) / size) * 100 : 0;
 
                 return (
-                  <Link
-                    key={String(a.id)}
-                    href={`/accounts/${a.id}`}
-                    className="block rounded-xl border border-red-200 bg-red-50/40 p-4 hover:bg-red-50"
-                    title="Открыть слитый счет"
-                  >
+                  <div key={id} className="rounded-xl border border-red-200 bg-red-50/40 p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="font-semibold text-gray-900">{getAccountLabel(a)}</div>
@@ -266,13 +308,37 @@ export default function AccountsPage() {
                         <div className="mt-1 text-xs text-gray-600">
                           Просадка: <span className="font-semibold text-red-700">{ddPct.toFixed(2)}%</span>
                         </div>
+                        <div className="mt-2 text-xs text-gray-500">Детальная страница: скоро</div>
                       </div>
-                      <div className="text-right">
-                        <div className="text-sm font-semibold text-gray-900">{fmtUsd(bal)}</div>
-                        <div className="text-xs text-gray-600">Баланс</div>
+
+                      <div className="flex flex-col items-end gap-2">
+                        <div className="text-right">
+                          <div className="text-sm font-semibold text-gray-900">{fmtUsd(bal)}</div>
+                          <div className="text-xs text-gray-600">Баланс</div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {/* EDIT -> same page /accounts/new?id=... */}
+                          <Link
+                            href={`/accounts/new?id=${encodeURIComponent(id)}`}
+                            className="rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-gray-50"
+                            title="Редактировать счет"
+                          >
+                            Редактировать
+                          </Link>
+
+                          <button
+                            onClick={() => deleteAccount(id)}
+                            disabled={busyId === id}
+                            className="rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+                            title="Удалить счет"
+                          >
+                            {busyId === id ? "Удаляю…" : "Удалить"}
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </Link>
+                  </div>
                 );
               })}
             </div>
