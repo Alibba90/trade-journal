@@ -32,11 +32,6 @@ function fmtUsd(n: number) {
   return `${sign}$ ${abs.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
 
-function fmtPercent(n: number | null | undefined) {
-  if (n === null || n === undefined || Number.isNaN(n)) return "—";
-  return `${Number(n).toFixed(2)}%`;
-}
-
 function phaseLabel(p: Account["phase"]) {
   if (p === "phase1") return "Фаза 1";
   if (p === "phase2") return "Фаза 2";
@@ -44,13 +39,31 @@ function phaseLabel(p: Account["phase"]) {
   return p ?? "—";
 }
 
-// ✅ слитые: status=blown OR balance <= size*0.9
+function toNum(v: any) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function fmtSignedPct(n: number, digits = 2) {
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${n.toFixed(digits)}%`;
+}
+
+function clamp(n: number, a: number, b: number) {
+  return Math.max(a, Math.min(b, n));
+}
+
+// ✅ blown:
+// 1) status='blown' OR
+// 2) balance <= size*0.9 (как ты хотел "−10% и ниже")
 function isBlown(a: Account) {
   const st = String(a.status || "").toLowerCase().trim();
   if (st === "blown" || st === "slit" || st === "слил") return true;
-  const size = Number(a.size) || 0;
-  const bal = Number(a.balance) || 0;
+
+  const size = toNum(a.size);
+  const bal = toNum(a.balance);
   if (!size) return false;
+
   return bal <= size * 0.9;
 }
 
@@ -92,7 +105,7 @@ export default function AccountsPage() {
     const blown = accounts.filter((a) => isBlown(a));
     const active = accounts.filter((a) => !isBlown(a));
 
-    const sumSize = (arr: Account[]) => arr.reduce((s, a) => s + (Number(a.size) || 0), 0);
+    const sumSize = (arr: Account[]) => arr.reduce((s, a) => s + toNum(a.size), 0);
 
     return {
       activeAccounts: active,
@@ -121,10 +134,10 @@ export default function AccountsPage() {
     setAccounts((prev) => prev.filter((a) => a.id !== id));
   }
 
-  // ✅ вывод прибыли для LIVE
+  // ✅ payout (как раньше)
   async function handlePayout(a: Account) {
-    const size = Number(a.size) || 0;
-    const bal = Number(a.balance) || 0;
+    const size = toNum(a.size);
+    const bal = toNum(a.balance);
     const profit = bal - size;
 
     if (a.phase !== "live") return;
@@ -149,7 +162,6 @@ export default function AccountsPage() {
 
     const userId = authData.user.id;
 
-    // 1) записываем выплату
     const { error: insErr } = await supabase.from("payouts").insert([
       {
         user_id: userId,
@@ -164,7 +176,6 @@ export default function AccountsPage() {
       return;
     }
 
-    // 2) обнуляем лайв к size
     const { error: updErr } = await supabase.from("accounts").update({ balance: size }).eq("id", a.id);
 
     setBusyId(null);
@@ -174,10 +185,52 @@ export default function AccountsPage() {
       return;
     }
 
-    // локально обновим
-    setAccounts((prev) =>
-      prev.map((x) => (x.id === a.id ? { ...x, balance: size } : x))
-    );
+    setAccounts((prev) => prev.map((x) => (x.id === a.id ? { ...x, balance: size } : x)));
+  }
+
+  // ✅ проценты: результат / до слива / до PASS
+  function calcPercents(a: Account) {
+    const size = toNum(a.size);
+    const bal = toNum(a.balance);
+
+    if (!size) {
+      return {
+        perfPct: 0,
+        toBlowPct: null as number | null,
+        toPassPct: null as number | null,
+        profitMoney: bal - size,
+      };
+    }
+
+    const perfPct = ((bal - size) / size) * 100;
+
+    // до слива — берём лимит из max_drawdown_percent
+    // minBalance = size*(1-dd/100)
+    const dd = toNum(a.max_drawdown_percent);
+    let toBlowPct: number | null = null;
+    if (dd > 0) {
+      const minBal = size * (1 - dd / 100);
+      toBlowPct = ((bal - minBal) / size) * 100; // сколько % осталось до пробития
+      toBlowPct = clamp(toBlowPct, -999, 999);
+    }
+
+    // до PASS — только для phase1/phase2
+    let toPassPct: number | null = null;
+    if (a.phase === "phase1" || a.phase === "phase2") {
+      const tgt = toNum(a.profit_target_percent);
+      if (tgt > 0) {
+        const targetBal = size * (1 + tgt / 100);
+        toPassPct = ((targetBal - bal) / size) * 100; // сколько % осталось добрать
+        toPassPct = clamp(toPassPct, -999, 999);
+      }
+    }
+
+    return {
+      perfPct,
+      toBlowPct,
+      toPassPct,
+      profitMoney: bal - size,
+    };
   }
 
   return (
@@ -202,7 +255,6 @@ export default function AccountsPage() {
             <Link
               href="/"
               className="inline-flex items-center justify-center rounded-xl px-4 py-2 border bg-white text-gray-900 hover:bg-gray-100 transition"
-              title="На главную"
             >
               ← Главная
             </Link>
@@ -210,7 +262,6 @@ export default function AccountsPage() {
             <Link
               href="/accounts/new"
               className="inline-flex items-center justify-center rounded-xl px-4 py-2 border bg-white text-gray-900 hover:bg-gray-100 transition"
-              title="Добавить новый счёт"
             >
               + Добавить счёт
             </Link>
@@ -228,9 +279,7 @@ export default function AccountsPage() {
         {!loading && accounts.length === 0 && (
           <div className="rounded-2xl border bg-white p-8 text-center">
             <h2 className="text-xl font-semibold text-gray-900">Счетов пока нет</h2>
-            <p className="text-gray-600 mt-2">
-              Добавь первый счёт — и начнём считать прогресс, лимиты и аналитику.
-            </p>
+            <p className="text-gray-600 mt-2">Добавь первый счёт — и начнём считать прогресс, лимиты и аналитику.</p>
             <Link
               href="/accounts/new"
               className="mt-6 inline-flex items-center justify-center rounded-xl px-5 py-3 bg-black text-white font-semibold hover:opacity-90 transition"
@@ -260,8 +309,26 @@ export default function AccountsPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {activeAccounts.map((a) => {
                 const isLive = a.phase === "live";
-                const profit = (Number(a.balance) || 0) - (Number(a.size) || 0);
-                const canPayout = isLive && profit > 0;
+                const { perfPct, toBlowPct, toPassPct, profitMoney } = calcPercents(a);
+
+                const canPayout = isLive && profitMoney > 0;
+
+                const perfCls =
+                  perfPct > 0 ? "text-green-700" : perfPct < 0 ? "text-red-700" : "text-gray-900";
+
+                const blowCls =
+                  toBlowPct !== null && toBlowPct <= 1
+                    ? "text-red-700"
+                    : toBlowPct !== null && toBlowPct <= 3
+                    ? "text-orange-700"
+                    : "text-gray-900";
+
+                const passCls =
+                  toPassPct !== null && toPassPct <= 1
+                    ? "text-emerald-700"
+                    : toPassPct !== null && toPassPct <= 3
+                    ? "text-blue-700"
+                    : "text-gray-900";
 
                 return (
                   <div key={a.id} className="rounded-2xl border bg-white p-5 shadow-sm">
@@ -275,23 +342,37 @@ export default function AccountsPage() {
                           <span className="text-gray-900">{fmtMoney(a.size)}</span>
                         </div>
 
-                        <div className="text-sm text-gray-600 mt-1">
+                        {/* ✅ ВАЖНО: тут новые показатели */}
+                        <div className="text-sm text-gray-600 mt-1 leading-6">
                           Этап: {phaseLabel(a.phase)} •{" "}
-                          {!isLive ? (
+                          <span className="text-gray-700">Результат:</span>{" "}
+                          <span className={`font-semibold ${perfCls}`}>{fmtSignedPct(perfPct)}</span>{" "}
+                          {isLive ? (
                             <>
-                              Цель: {fmtPercent(a.profit_target_percent)} •{" "}
-                            </>
-                          ) : (
-                            <>
-                              Профит:{" "}
-                              <span className={profit > 0 ? "font-semibold text-green-700" : profit < 0 ? "font-semibold text-red-700" : "font-semibold text-gray-900"}>
-                                {fmtUsd(profit)}
+                              <span className="text-gray-400">•</span>{" "}
+                              <span className="text-gray-700">Профит:</span>{" "}
+                              <span className={`font-semibold ${profitMoney > 0 ? "text-green-700" : profitMoney < 0 ? "text-red-700" : "text-gray-900"}`}>
+                                {fmtUsd(profitMoney)}
                               </span>{" "}
-                              •{" "}
                             </>
-                          )}
-                          Просадка: {fmtPercent(a.max_drawdown_percent)} • Баланс:{" "}
-                          <span className="font-semibold text-gray-900">{fmtMoney(a.balance)}</span>
+                          ) : null}
+                          <span className="text-gray-400">•</span>{" "}
+                          <span className="text-gray-700">До слива:</span>{" "}
+                          <span className={`font-semibold ${blowCls}`}>
+                            {toBlowPct === null ? "—" : `${toBlowPct.toFixed(2)}%`}
+                          </span>{" "}
+                          {a.phase === "phase1" || a.phase === "phase2" ? (
+                            <>
+                              <span className="text-gray-400">•</span>{" "}
+                              <span className="text-gray-700">До PASS:</span>{" "}
+                              <span className={`font-semibold ${passCls}`}>
+                                {toPassPct === null ? "—" : `${toPassPct.toFixed(2)}%`}
+                              </span>
+                            </>
+                          ) : null}
+                          <div className="text-gray-700">
+                            Баланс: <span className="font-semibold text-gray-900">{fmtMoney(a.balance)}</span>
+                          </div>
                         </div>
                       </div>
 
@@ -345,36 +426,36 @@ export default function AccountsPage() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {blownAccounts.map((a) => (
-                <div
-                  key={a.id}
-                  className="rounded-2xl border border-red-200 bg-red-50/40 p-5 shadow-sm"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-lg font-bold text-gray-900 truncate">
-                        {a.account_number || "Без номера"}{" "}
-                        <span className="text-gray-400 font-semibold">•</span>{" "}
-                        <span className="text-gray-700 font-semibold">{a.firm || "—"}</span>{" "}
-                        <span className="text-gray-400 font-semibold">•</span>{" "}
-                        <span className="text-gray-900">{fmtMoney(a.size)}</span>
-                      </div>
+              {blownAccounts.map((a) => {
+                const { perfPct } = calcPercents(a);
+                const perfCls = perfPct > 0 ? "text-green-700" : perfPct < 0 ? "text-red-700" : "text-gray-900";
 
-                      <div className="text-sm text-gray-700 mt-1">
-                        Статус: <span className="font-semibold text-red-700">Слит</span> • Этап:{" "}
-                        {phaseLabel(a.phase)} • Баланс:{" "}
-                        <span className="font-semibold text-gray-900">{fmtMoney(a.balance)}</span>
-                      </div>
+                return (
+                  <div key={a.id} className="rounded-2xl border border-red-200 bg-red-50/40 p-5 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-lg font-bold text-gray-900 truncate">
+                          {a.account_number || "Без номера"}{" "}
+                          <span className="text-gray-400 font-semibold">•</span>{" "}
+                          <span className="text-gray-700 font-semibold">{a.firm || "—"}</span>{" "}
+                          <span className="text-gray-400 font-semibold">•</span>{" "}
+                          <span className="text-gray-900">{fmtMoney(a.size)}</span>
+                        </div>
 
-                      <div className="mt-2 text-xs text-gray-600">
-                        Слитые счета нельзя редактировать/удалять.
+                        <div className="text-sm text-gray-700 mt-1 leading-6">
+                          Статус: <span className="font-semibold text-red-700">Слит</span> • Этап: {phaseLabel(a.phase)}
+                          <div>
+                            Результат: <span className={`font-semibold ${perfCls}`}>{fmtSignedPct(perfPct)}</span> • Баланс:{" "}
+                            <span className="font-semibold text-gray-900">{fmtMoney(a.balance)}</span>
+                          </div>
+                        </div>
+
+                        <div className="mt-2 text-xs text-gray-600">Слитые счета нельзя редактировать/удалять.</div>
                       </div>
                     </div>
-
-                    {/* ✅ Никаких кнопок для слитых */}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
         )}
