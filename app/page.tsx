@@ -195,6 +195,9 @@ export default function HomePage() {
   const [tradesLast5, setTradesLast5] = useState<TradeRow[]>([]);
   const [errMsg, setErrMsg] = useState<string | null>(null);
 
+  // ✅ итого заработано (выплаты)
+  const [totalEarned, setTotalEarned] = useState<number>(0);
+
   // calendar UI
   const [calCursor, setCalCursor] = useState<Date>(() => new Date());
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
@@ -207,7 +210,7 @@ export default function HomePage() {
   const weekStart = useMemo(() => startOfWeekMonday(new Date()), []);
   const weekEnd = useMemo(() => endOfWeekSunday(new Date()), []);
 
-  // ---- account getters (ВАЖНО: под твою схему Supabase) ----
+  // ---- account getters ----
   const getAccountNum = (a: any) =>
     String(pick(a, ["account_number", "account_num", "account_number", "number", "acc_num"], "") || "").trim();
 
@@ -220,14 +223,12 @@ export default function HomePage() {
   const getPhaseRaw = (a: any) => pick(a, ["phase", "stage"], "");
   const getPhase = (a: any) => normalizePhase(getPhaseRaw(a));
 
-  // ✅ ТВОИ КОЛОНКИ:
-  // max_drawdown_percent
   const getMaxDDPct = (a: any) =>
     normalizePctMaybe(
       pick(
         a,
         [
-          "max_drawdown_percent", // ✅ твое
+          "max_drawdown_percent",
           "max_drawdown",
           "max_drawdown_pct",
           "max_dd",
@@ -245,13 +246,12 @@ export default function HomePage() {
       )
     );
 
-  // profit_target_percent
   const getProfitTargetPct = (a: any) =>
     normalizePctMaybe(
       pick(
         a,
         [
-          "profit_target_percent", // ✅ твое
+          "profit_target_percent",
           "profit_target",
           "profit_target_pct",
           "target",
@@ -279,11 +279,11 @@ export default function HomePage() {
   };
 
   // blown logic:
-  // 1) если в базе есть status='blown' — используем
+  // 1) если status='blown' — blown
   // 2) иначе считаем blown по формуле >=10% DD: balance <= size*0.9
   const isBlown = (a: any) => {
     const st = String(a?.status || "").toLowerCase().trim();
-    if (st === "blown") return true;
+    if (st === "blown" || st === "slit" || st === "слил") return true;
     const size = getSize(a);
     const bal = getBalance(a);
     if (!size) return false;
@@ -318,11 +318,24 @@ export default function HomePage() {
       if (prof) setUsername(String(pick(prof, ["username"], "") || ""));
     } catch {}
 
-    // accounts (active сверху, blown снизу)
+    // ✅ payouts sum (итого заработано)
+    try {
+      const { data: pays, error: paysErr } = await supabase.from("payouts").select("amount");
+      if (paysErr) {
+        console.log("PAYOUTS ERROR:", paysErr);
+        setTotalEarned(0);
+      } else {
+        const sum = (pays || []).reduce((s: number, r: any) => s + toNum(r.amount), 0);
+        setTotalEarned(sum);
+      }
+    } catch {
+      setTotalEarned(0);
+    }
+
+    // accounts
     const { data: acc, error: accErr } = await supabase
       .from("accounts")
       .select("*")
-      .order("status", { ascending: true })
       .order("created_at", { ascending: false });
 
     if (accErr) {
@@ -486,7 +499,7 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accounts]);
 
-  // ---- trade analytics (outcomes-based best/worst) ----
+  // ---- trade analytics ----
   const tradeStats = useMemo(() => {
     const now = new Date();
 
@@ -550,7 +563,7 @@ export default function HomePage() {
       if (ranked.length === 0) return { best: null as GroupAgg | null, worst: null as GroupAgg | null };
 
       const best = [...ranked].sort((a, b) => b.wr - a.wr || b.count - a.count)[0];
-      const worst = [...ranked].sort((a, b) => a.wr - b.wr || b.count - a.count)[0];
+      const worst = [...ranked].sort((a, b) => a.wr - a.wr || b.count - a.count)[0];
 
       return { best, worst };
     }
@@ -633,7 +646,7 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accounts]);
 
-  // colors requested
+  // colors
   const C_PHASE1 = "#3B82F6";
   const C_PHASE2 = "#F59E0B";
   const C_LIVE = "#22C55E";
@@ -683,7 +696,6 @@ export default function HomePage() {
     );
   }
 
-  // если нет активных счетов — мягкий онбординг
   const hasActiveAccounts = accStats.totalActive > 0;
 
   return (
@@ -735,7 +747,6 @@ export default function HomePage() {
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{errMsg}</div>
         ) : null}
 
-        {/* ONBOARDING: если нет активных счетов */}
         {!hasActiveAccounts ? (
           <div className="mb-4 rounded-2xl border bg-white p-6 shadow-sm">
             <div className="text-lg font-semibold text-gray-900">Начнём с первого счёта</div>
@@ -744,7 +755,7 @@ export default function HomePage() {
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
               <Link
-                href="/accounts"
+                href="/accounts/new"
                 className="inline-flex items-center justify-center rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white hover:opacity-90"
               >
                 Добавить счёт
@@ -759,7 +770,6 @@ export default function HomePage() {
           </div>
         ) : null}
 
-        {/* ACCOUNTS */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-6">
           <Card title="Активные счета">
             <div className="text-3xl font-bold text-gray-900">{accStats.totalActive}</div>
@@ -768,9 +778,9 @@ export default function HomePage() {
             </div>
           </Card>
 
-          <Card title="Слитые счета (−10% и ниже)">
+          <Card title="Слитые счета (−10% и ниже)" className="border-red-200 bg-red-50/40">
             <div className="text-3xl font-bold text-gray-900">{accStats.blownCount}</div>
-            <div className="mt-2 text-xs text-gray-600">
+            <div className="mt-2 text-xs text-gray-700">
               Сумма: <span className="font-semibold">{fmtUsd(accStats.blownSum)}</span>
             </div>
           </Card>
@@ -794,9 +804,9 @@ export default function HomePage() {
             <div className="mt-2 text-xs text-gray-600">Сумма балансов активных счетов</div>
           </Card>
 
-          <Card title="Готово на выплату (лайвы)">
-            <div className="text-2xl font-bold text-gray-900">{fmtUsd(accStats.payoutReady)}</div>
-            <div className="mt-2 text-xs text-gray-600">Сумма профита на лайвах, если профит ≥ 1%</div>
+          <Card title="Итого заработано (выводы)">
+            <div className="text-2xl font-bold text-gray-900">{fmtUsd(totalEarned)}</div>
+            <div className="mt-2 text-xs text-gray-600">Сумма всех выведенных прибылей с лайвов</div>
           </Card>
         </div>
 
@@ -885,7 +895,7 @@ export default function HomePage() {
           </Box>
         </div>
 
-        {/* Слитые счета списком (всегда внизу на главной) */}
+        {/* Слитые счета списком */}
         <div className="mt-4">
           <Box title={`Слитые счета (внизу): ${accStats.blownCount} • ${fmtUsd(accStats.blownSum)}`}>
             {accStats.blownCount === 0 ? (
@@ -893,10 +903,10 @@ export default function HomePage() {
             ) : (
               <div className="space-y-3">
                 {accStats.blownList.map((a: any) => (
-                  <MiniRow key={String(a.id)}>
+                  <MiniRow key={String(a.id)} className="border-red-200 bg-red-50/40">
                     <div className="font-semibold text-gray-900">{getAccountLabel(a)}</div>
-                    <div className="mt-1 text-xs text-gray-500">
-                      Размер: {fmtUsd(getSize(a))} • Баланс: {fmtUsd(getBalance(a))} • Статус:{" "}
+                    <div className="mt-1 text-xs text-gray-700">
+                      Размер: {fmtUsd(getSize(a))} • Баланс: {fmtUsd(getBalance(a))} •{" "}
                       <span className="font-semibold text-red-700">Слитый</span>
                     </div>
                   </MiniRow>
@@ -1212,8 +1222,8 @@ function Box({ title, children }: { title: string; children: React.ReactNode }) 
   );
 }
 
-function MiniRow({ children }: { children: React.ReactNode }) {
-  return <div className="rounded-xl border bg-white p-4">{children}</div>;
+function MiniRow({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return <div className={`rounded-xl border bg-white p-4 ${className}`}>{children}</div>;
 }
 
 function LegendDot({ color, label, value }: { color: string; label: string; value: string }) {

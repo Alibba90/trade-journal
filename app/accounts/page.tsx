@@ -14,7 +14,7 @@ type Account = {
   balance: number | null;
   max_drawdown_percent: number | null;
   profit_target_percent: number | null;
-  status?: string | null; // если у тебя есть (например "blown"/"active") — просто подтянется
+  status?: string | null;
 };
 
 function fmtMoney(n: number | null | undefined) {
@@ -24,6 +24,12 @@ function fmtMoney(n: number | null | undefined) {
     currency: "USD",
     maximumFractionDigits: 0,
   }).format(n);
+}
+
+function fmtUsd(n: number) {
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.abs(n);
+  return `${sign}$ ${abs.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
 
 function fmtPercent(n: number | null | undefined) {
@@ -36,6 +42,16 @@ function phaseLabel(p: Account["phase"]) {
   if (p === "phase2") return "Фаза 2";
   if (p === "live") return "Лайв";
   return p ?? "—";
+}
+
+// ✅ слитые: status=blown OR balance <= size*0.9
+function isBlown(a: Account) {
+  const st = String(a.status || "").toLowerCase().trim();
+  if (st === "blown" || st === "slit" || st === "слил") return true;
+  const size = Number(a.size) || 0;
+  const bal = Number(a.balance) || 0;
+  if (!size) return false;
+  return bal <= size * 0.9;
 }
 
 export default function AccountsPage() {
@@ -59,9 +75,7 @@ export default function AccountsPage() {
 
     const { data, error } = await supabase
       .from("accounts")
-      .select(
-        "id, account_number, firm, size, phase, balance, max_drawdown_percent, profit_target_percent, status"
-      )
+      .select("id, account_number, firm, size, phase, balance, max_drawdown_percent, profit_target_percent, status, created_at")
       .order("created_at", { ascending: true });
 
     if (error) setError(error.message);
@@ -75,11 +89,10 @@ export default function AccountsPage() {
   }, []);
 
   const { activeAccounts, blownAccounts, totalAlloc, blownTotalAlloc } = useMemo(() => {
-    const blown = accounts.filter((a) => a.status === "blown" || a.status === "slit" || a.status === "слил");
-    const active = accounts.filter((a) => !blown.includes(a));
+    const blown = accounts.filter((a) => isBlown(a));
+    const active = accounts.filter((a) => !isBlown(a));
 
-    const sumSize = (arr: Account[]) =>
-      arr.reduce((s, a) => s + (Number(a.size) || 0), 0);
+    const sumSize = (arr: Account[]) => arr.reduce((s, a) => s + (Number(a.size) || 0), 0);
 
     return {
       activeAccounts: active,
@@ -105,8 +118,66 @@ export default function AccountsPage() {
       return;
     }
 
-    // обновим список
     setAccounts((prev) => prev.filter((a) => a.id !== id));
+  }
+
+  // ✅ вывод прибыли для LIVE
+  async function handlePayout(a: Account) {
+    const size = Number(a.size) || 0;
+    const bal = Number(a.balance) || 0;
+    const profit = bal - size;
+
+    if (a.phase !== "live") return;
+    if (profit <= 0) {
+      alert("Профита нет — выводить нечего.");
+      return;
+    }
+
+    const ok = confirm(`Вывести прибыль ${fmtUsd(profit)}?\nПосле вывода баланс лайва станет ${fmtMoney(size)}.`);
+    if (!ok) return;
+
+    setBusyId(a.id);
+    setError("");
+
+    const { data: authData, error: authErr } = await supabase.auth.getUser();
+    if (authErr || !authData.user) {
+      setBusyId(null);
+      alert("Сессия не найдена. Перезайди в аккаунт.");
+      router.push("/login");
+      return;
+    }
+
+    const userId = authData.user.id;
+
+    // 1) записываем выплату
+    const { error: insErr } = await supabase.from("payouts").insert([
+      {
+        user_id: userId,
+        account_id: a.id,
+        amount: profit,
+      },
+    ]);
+
+    if (insErr) {
+      setBusyId(null);
+      setError(insErr.message);
+      return;
+    }
+
+    // 2) обнуляем лайв к size
+    const { error: updErr } = await supabase.from("accounts").update({ balance: size }).eq("id", a.id);
+
+    setBusyId(null);
+
+    if (updErr) {
+      setError(updErr.message);
+      return;
+    }
+
+    // локально обновим
+    setAccounts((prev) =>
+      prev.map((x) => (x.id === a.id ? { ...x, balance: size } : x))
+    );
   }
 
   return (
@@ -127,13 +198,23 @@ export default function AccountsPage() {
             </p>
           </div>
 
-          <Link
-            href="/accounts/new"
-            className="inline-flex items-center justify-center rounded-xl px-4 py-2 border bg-white text-gray-900 hover:bg-gray-100 transition"
-            title="Добавить новый счёт"
-          >
-            + Добавить счёт
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/"
+              className="inline-flex items-center justify-center rounded-xl px-4 py-2 border bg-white text-gray-900 hover:bg-gray-100 transition"
+              title="На главную"
+            >
+              ← Главная
+            </Link>
+
+            <Link
+              href="/accounts/new"
+              className="inline-flex items-center justify-center rounded-xl px-4 py-2 border bg-white text-gray-900 hover:bg-gray-100 transition"
+              title="Добавить новый счёт"
+            >
+              + Добавить счёт
+            </Link>
+          </div>
         </div>
 
         {/* Error */}
@@ -177,51 +258,76 @@ export default function AccountsPage() {
             <h2 className="text-lg font-semibold text-gray-900 mb-3">Активные счета</h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {activeAccounts.map((a) => (
-                <div
-                  key={a.id}
-                  className="rounded-2xl border bg-white p-5 shadow-sm"
-                >
-                  {/* Top line */}
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-lg font-bold text-gray-900 truncate">
-                        {a.account_number || "Без номера"}{" "}
-                        <span className="text-gray-400 font-semibold">•</span>{" "}
-                        <span className="text-gray-700 font-semibold">{a.firm || "—"}</span>{" "}
-                        <span className="text-gray-400 font-semibold">•</span>{" "}
-                        <span className="text-gray-900">{fmtMoney(a.size)}</span>
+              {activeAccounts.map((a) => {
+                const isLive = a.phase === "live";
+                const profit = (Number(a.balance) || 0) - (Number(a.size) || 0);
+                const canPayout = isLive && profit > 0;
+
+                return (
+                  <div key={a.id} className="rounded-2xl border bg-white p-5 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-lg font-bold text-gray-900 truncate">
+                          {a.account_number || "Без номера"}{" "}
+                          <span className="text-gray-400 font-semibold">•</span>{" "}
+                          <span className="text-gray-700 font-semibold">{a.firm || "—"}</span>{" "}
+                          <span className="text-gray-400 font-semibold">•</span>{" "}
+                          <span className="text-gray-900">{fmtMoney(a.size)}</span>
+                        </div>
+
+                        <div className="text-sm text-gray-600 mt-1">
+                          Этап: {phaseLabel(a.phase)} •{" "}
+                          {!isLive ? (
+                            <>
+                              Цель: {fmtPercent(a.profit_target_percent)} •{" "}
+                            </>
+                          ) : (
+                            <>
+                              Профит:{" "}
+                              <span className={profit > 0 ? "font-semibold text-green-700" : profit < 0 ? "font-semibold text-red-700" : "font-semibold text-gray-900"}>
+                                {fmtUsd(profit)}
+                              </span>{" "}
+                              •{" "}
+                            </>
+                          )}
+                          Просадка: {fmtPercent(a.max_drawdown_percent)} • Баланс:{" "}
+                          <span className="font-semibold text-gray-900">{fmtMoney(a.balance)}</span>
+                        </div>
                       </div>
 
-                      <div className="text-sm text-gray-600 mt-1">
-                        Этап: {phaseLabel(a.phase)} • Цель: {fmtPercent(a.profit_target_percent)} • Просадка:{" "}
-                        {fmtPercent(a.max_drawdown_percent)} • Баланс:{" "}
-                        <span className="font-semibold text-gray-900">{fmtMoney(a.balance)}</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {canPayout ? (
+                          <button
+                            onClick={() => handlePayout(a)}
+                            disabled={busyId === a.id}
+                            className="rounded-lg px-3 py-2 border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition disabled:opacity-60"
+                            title="Вывести прибыль (лайв обнулится до размера)"
+                          >
+                            {busyId === a.id ? "…" : "💸"}
+                          </button>
+                        ) : null}
+
+                        <Link
+                          href={`/accounts/edit?id=${a.id}`}
+                          className="rounded-lg px-3 py-2 border bg-white text-gray-900 hover:bg-gray-100 transition"
+                          title="Редактировать счёт"
+                        >
+                          ✎
+                        </Link>
+
+                        <button
+                          onClick={() => handleDelete(a.id)}
+                          disabled={busyId === a.id}
+                          className="rounded-lg px-3 py-2 border border-red-200 bg-white text-red-600 hover:bg-red-50 transition disabled:opacity-60"
+                          title="Удалить счёт"
+                        >
+                          {busyId === a.id ? "…" : "🗑"}
+                        </button>
                       </div>
-                    </div>
-
-                    {/* Actions (НЕ делаем карточку кликабельной) */}
-                    <div className="flex items-center gap-2 shrink-0">
-                      <Link
-                        href={`/accounts/edit?id=${a.id}`}
-                        className="rounded-lg px-3 py-2 border bg-white text-gray-900 hover:bg-gray-100 transition"
-                        title="Редактировать счёт"
-                      >
-                        ✎
-                      </Link>
-
-                      <button
-                        onClick={() => handleDelete(a.id)}
-                        disabled={busyId === a.id}
-                        className="rounded-lg px-3 py-2 border border-red-200 bg-white text-red-600 hover:bg-red-50 transition disabled:opacity-60"
-                        title="Удалить счёт"
-                      >
-                        {busyId === a.id ? "…" : "🗑"}
-                      </button>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
         )}
@@ -242,7 +348,7 @@ export default function AccountsPage() {
               {blownAccounts.map((a) => (
                 <div
                   key={a.id}
-                  className="rounded-2xl border bg-white p-5 shadow-sm opacity-95"
+                  className="rounded-2xl border border-red-200 bg-red-50/40 p-5 shadow-sm"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -254,31 +360,18 @@ export default function AccountsPage() {
                         <span className="text-gray-900">{fmtMoney(a.size)}</span>
                       </div>
 
-                      <div className="text-sm text-gray-600 mt-1">
-                        Статус: <span className="font-semibold text-gray-900">Слит</span> • Этап:{" "}
+                      <div className="text-sm text-gray-700 mt-1">
+                        Статус: <span className="font-semibold text-red-700">Слит</span> • Этап:{" "}
                         {phaseLabel(a.phase)} • Баланс:{" "}
                         <span className="font-semibold text-gray-900">{fmtMoney(a.balance)}</span>
                       </div>
+
+                      <div className="mt-2 text-xs text-gray-600">
+                        Слитые счета нельзя редактировать/удалять.
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      <Link
-                        href={`/accounts/edit?id=${a.id}`}
-                        className="rounded-lg px-3 py-2 border bg-white text-gray-900 hover:bg-gray-100 transition"
-                        title="Редактировать счёт"
-                      >
-                        ✎
-                      </Link>
-
-                      <button
-                        onClick={() => handleDelete(a.id)}
-                        disabled={busyId === a.id}
-                        className="rounded-lg px-3 py-2 border border-red-200 bg-white text-red-600 hover:bg-red-50 transition disabled:opacity-60"
-                        title="Удалить счёт"
-                      >
-                        {busyId === a.id ? "…" : "🗑"}
-                      </button>
-                    </div>
+                    {/* ✅ Никаких кнопок для слитых */}
                   </div>
                 </div>
               ))}
