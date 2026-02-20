@@ -198,9 +198,6 @@ export default function AccountsPage() {
   // ✅ ВЫВЕСТИ ПРИБЫЛЬ: только для лайвов с профитом > 0
   // ✅ ВАЖНО: пишет запись в public.payouts и обнуляет баланс до размера (RPC withdraw_live_profit)
   async function handleWithdrawProfit(a: Account) {
-    // ✅ DEBUG: проверяем, что клик вообще срабатывает
-    alert("withdraw click: " + (a.account_number ?? a.id));
-
     const size = n(a.size);
     const balance = n(a.balance);
     if (size <= 0) return;
@@ -230,8 +227,6 @@ export default function AccountsPage() {
     // обновим локально, чтобы сразу было видно
     setAccounts((prev) => prev.map((x) => (x.id === a.id ? { ...x, balance: size } : x)));
 
-    // data можно не использовать, но пусть будет корректно
-    // const withdrawn = Array.isArray(data) ? Number(data?.[0]?.withdrawn ?? profit) : profit;
     void data;
   }
 
