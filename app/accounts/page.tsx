@@ -1,562 +1,284 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/src/lib/supabaseClient";
 
-type Account = {
-  id: string;
-  account_number: string | null;
-  firm: string | null;
-  size: number | null;
-  balance: number | null;
-  phase: string | null; // phase1 | phase2 | live
-  max_drawdown_percent: number | null;
-  profit_target_percent: number | null;
-  created_at?: string | null;
+function pick<T = any>(obj: any, keys: string[], fallback: T): T {
+  for (const k of keys) {
+    if (obj && obj[k] !== undefined && obj[k] !== null && obj[k] !== "") return obj[k] as T;
+  }
+  return fallback;
+}
+
+function toNum(v: any): number {
+  if (v === null || v === undefined) return 0;
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+
+  let s = String(v).trim();
+  if (!s) return 0;
+
+  s = s.replace(/\s+/g, "");
+  s = s.replace(",", ".");
+  s = s.replace(/[%$₸€₽]/g, "");
+  s = s.replace(/[^0-9.\-]/g, "");
+
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function fmtMoney(n: number) {
+  return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+}
+function fmtUsd(n: number) {
+  const sign = n < 0 ? "-" : "";
+  return `${sign}$ ${fmtMoney(Math.abs(n))}`;
+}
+
+function normalizePhase(v: any): "phase1" | "phase2" | "live" | "other" {
+  const s = String(v || "").toLowerCase().trim();
+  if (s.includes("phase 1") || s.includes("phase1") || s.includes("фаза 1") || s === "phase1") return "phase1";
+  if (s.includes("phase 2") || s.includes("phase2") || s.includes("фаза 2") || s === "phase2") return "phase2";
+  if (s.includes("live") || s.includes("лайв") || s === "live") return "live";
+  return "other";
+}
+
+const PHASE_LABEL: Record<string, string> = {
+  phase1: "Фаза 1",
+  phase2: "Фаза 2",
+  live: "Лайв",
 };
 
-type Phase = "phase1" | "phase2" | "live";
-
-export default function AccountPage() {
+export default function AccountsPage() {
   const [loading, setLoading] = useState(true);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [errorText, setErrorText] = useState<string | null>(null);
+  const [isAuthed, setIsAuthed] = useState(false);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
 
-  // create form
-  const [accountNumber, setAccountNumber] = useState("");
-  const [firm, setFirm] = useState("");
-  const [phase, setPhase] = useState<Phase>("phase1");
-  const [size, setSize] = useState("25000");
-  const [balance, setBalance] = useState("25000");
-  const [maxDD, setMaxDD] = useState("10");
-  const [target, setTarget] = useState("8");
+  const [accounts, setAccounts] = useState<any[]>([]);
 
-  // edit modal
-  const [editing, setEditing] = useState<Account | null>(null);
-  const [editForm, setEditForm] = useState({
-    account_number: "",
-    firm: "",
-    phase: "phase1" as Phase,
-    size: "",
-    balance: "",
-    max_drawdown_percent: "",
-    profit_target_percent: "",
-  });
+  const getAccountNum = (a: any) =>
+    String(pick(a, ["account_number", "account_num", "number", "acc_num"], "") || "").trim();
+  const getFirm = (a: any) => String(pick(a, ["firm", "company"], "") || "").trim();
+  const getSize = (a: any) => toNum(pick(a, ["size", "account_size"], 0));
+  const getBalance = (a: any) => toNum(pick(a, ["balance", "current_balance"], 0));
+  const getPhaseRaw = (a: any) => pick(a, ["phase", "stage"], "");
+  const getPhase = (a: any) => normalizePhase(getPhaseRaw(a));
 
-  const calcPnLPercent = (a: Account) => {
-    const s = a.size ?? 0;
-    const b = a.balance ?? 0;
-    if (!s) return 0;
-    return ((b - s) / s) * 100;
+  const getAccountLabel = (a: any) => {
+    const num = getAccountNum(a);
+    const firm = getFirm(a);
+    const size = getSize(a);
+    const parts = [num || "Счёт", firm ? `• ${firm}` : "", size ? `• $${fmtMoney(size)}` : ""]
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return parts || "Счёт";
   };
 
-  const calcToDD = (a: Account) => {
-    const s = a.size ?? 0;
-    const b = a.balance ?? 0;
-    const ddp = a.max_drawdown_percent ?? 0;
-    const minBalance = s - s * (ddp / 100);
-    const leftUsd = b - minBalance;
-    const leftPct = s ? (leftUsd / s) * 100 : 0;
-    return { leftUsd, leftPct };
+  const isBlown = (a: any) => {
+    const st = String(a?.status || "").toLowerCase().trim();
+    if (st === "blown") return true;
+    const size = getSize(a);
+    const bal = getBalance(a);
+    if (!size) return false;
+    return bal <= size * 0.9;
   };
 
-  const calcToPass = (a: Account) => {
-    if (a.phase === "live") return null;
-    const s = a.size ?? 0;
-    const b = a.balance ?? 0;
-    const tp = a.profit_target_percent ?? 0;
-    const passBalance = s * (1 + tp / 100);
-    const leftUsd = passBalance - b;
-    const leftPct = s ? (leftUsd / s) * 100 : 0;
-    return { leftUsd, leftPct };
-  };
-
-  const nicePhase = (p: string | null) => {
-    if (p === "phase1") return "Фаза 1";
-    if (p === "phase2") return "Фаза 2";
-    if (p === "live") return "Лайв";
-    return p ?? "-";
-  };
-
-  const load = async () => {
+  async function loadAccounts() {
+    setErrMsg(null);
     setLoading(true);
-    setErrorText(null);
 
-    const { data: u, error: uErr } = await supabase.auth.getUser();
-    if (uErr) {
-      setErrorText(uErr.message);
-      setLoading(false);
-      return;
-    }
-
-    const user = u.user;
+    const { data: authData } = await supabase.auth.getUser();
+    const user = authData.user;
     if (!user) {
-      setUserEmail(null);
-      setAccounts([]);
+      setIsAuthed(false);
       setLoading(false);
       return;
     }
+    setIsAuthed(true);
 
-    setUserEmail(user.email ?? null);
-
-    // ВАЖНО: фильтр по user_id, чтобы даже при кривых policy не было "пусто"
     const { data, error } = await supabase
       .from("accounts")
       .select("*")
-      .eq("user_id", user.id)
+      .order("status", { ascending: true })
       .order("created_at", { ascending: false });
 
     if (error) {
-      setErrorText(error.message);
+      setErrMsg(error.message);
       setAccounts([]);
-      setLoading(false);
-      return;
+    } else {
+      setAccounts(data || []);
     }
 
-    setAccounts((data as Account[]) ?? []);
     setLoading(false);
-  };
+  }
 
   useEffect(() => {
-    load();
-    const { data: sub } = supabase.auth.onAuthStateChange(() => {
-      load();
-    });
-    return () => {
-      sub.subscription.unsubscribe();
-    };
+    loadAccounts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const createAccount = async () => {
-    setErrorText(null);
-    const { data: u } = await supabase.auth.getUser();
-    const user = u.user;
-    if (!user) {
-      setErrorText("Нужно войти в аккаунт");
-      return;
-    }
+  const view = useMemo(() => {
+    const active = accounts.filter((a) => !isBlown(a));
+    const blown = accounts.filter((a) => isBlown(a));
 
-    if (!accountNumber.trim()) {
-      setErrorText("Номер счёта обязателен");
-      return;
-    }
+    const activeSum = active.reduce((s, a) => s + getSize(a), 0);
+    const blownSum = blown.reduce((s, a) => s + getSize(a), 0);
 
-    const payload = {
-      user_id: user.id,
-      account_number: accountNumber.trim(),
-      firm: firm.trim() || null,
-      phase,
-      size: Number(size),
-      balance: Number(balance),
-      max_drawdown_percent: Number(maxDD),
-      profit_target_percent: phase === "live" ? null : Number(target),
-    };
-
-    const { error } = await supabase.from("accounts").insert(payload);
-    if (error) {
-      setErrorText(error.message);
-      return;
-    }
-
-    setAccountNumber("");
-    setFirm("");
-    setPhase("phase1");
-    setSize("25000");
-    setBalance("25000");
-    setMaxDD("10");
-    setTarget("8");
-
-    await load();
-  };
-
-  const deleteAccount = async (id: string) => {
-    if (!confirm("Удалить счёт?")) return;
-
-    const { error } = await supabase.from("accounts").delete().eq("id", id);
-    if (error) {
-      setErrorText(error.message);
-      return;
-    }
-    await load();
-  };
-
-  const openEdit = (a: Account) => {
-    setEditing(a);
-    setEditForm({
-      account_number: a.account_number ?? "",
-      firm: a.firm ?? "",
-      phase: (a.phase as Phase) ?? "phase1",
-      size: String(a.size ?? ""),
-      balance: String(a.balance ?? ""),
-      max_drawdown_percent: String(a.max_drawdown_percent ?? ""),
-      profit_target_percent: String(a.profit_target_percent ?? ""),
-    });
-  };
-
-  const saveEdit = async () => {
-    if (!editing) return;
-    setErrorText(null);
-
-    const updatePayload: any = {
-      account_number: editForm.account_number.trim(),
-      firm: editForm.firm.trim() || null,
-      phase: editForm.phase,
-      size: Number(editForm.size),
-      balance: Number(editForm.balance),
-      max_drawdown_percent: Number(editForm.max_drawdown_percent),
-      profit_target_percent: editForm.phase === "live" ? null : Number(editForm.profit_target_percent),
-    };
-
-    const { error } = await supabase.from("accounts").update(updatePayload).eq("id", editing.id);
-    if (error) {
-      setErrorText(error.message);
-      return;
-    }
-
-    setEditing(null);
-    await load();
-  };
-
-  const headerStats = useMemo(() => {
-    const total = accounts.length;
-    const inProfit = accounts.filter((a) => calcPnLPercent(a) > 0).length;
-    return { total, inProfit };
+    return { active, blown, activeSum, blownSum };
   }, [accounts]);
 
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-gray-600">Загрузка…</div>
+      </main>
+    );
+  }
+
+  if (!isAuthed) {
+    return (
+      <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+        <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-sm border">
+          <h1 className="text-2xl font-bold text-gray-900">Счета</h1>
+          <p className="mt-2 text-gray-600">Войди в аккаунт, чтобы видеть список счетов.</p>
+          <Link
+            href="/login"
+            className="mt-6 inline-flex w-full items-center justify-center rounded-xl bg-black px-4 py-3 text-white font-semibold hover:opacity-90"
+          >
+            Войти
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-200 p-8 md:p-10">
-      <div className="max-w-6xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
+    <main className="min-h-screen bg-gray-50">
+      <header className="mx-auto max-w-6xl px-6 pt-10 pb-6">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold">Счета</h1>
-            <div className="text-sm text-gray-600 mt-1">
-              {userEmail ? (
-                <>
-                  Пользователь: <span className="text-gray-900 font-medium">{userEmail}</span> • Счетов:{" "}
-                  <span className="text-gray-900 font-medium">{headerStats.total}</span> • В плюсе:{" "}
-                  <span className="text-gray-900 font-medium">{headerStats.inProfit}</span>
-                </>
-              ) : (
-                "Не авторизован"
-              )}
-            </div>
+            <h1 className="text-3xl font-bold text-gray-900">Счета</h1>
+            <p className="mt-2 text-sm text-gray-600">
+              Активные: <span className="font-semibold">{view.active.length}</span> • {fmtUsd(view.activeSum)}{" "}
+              <span className="mx-2">|</span>
+              Слитые: <span className="font-semibold text-red-700">{view.blown.length}</span> •{" "}
+              <span className="font-semibold text-red-700">{fmtUsd(view.blownSum)}</span>
+            </p>
           </div>
 
-          <a className="text-sm text-gray-700 hover:text-black" href="/">
-            ← Главная
-          </a>
-        </div>
-
-        {errorText && (
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4">
-            {errorText}
-          </div>
-        )}
-
-        <div className="bg-white rounded-3xl shadow-lg p-6">
-          <h2 className="font-semibold text-lg mb-4">Добавить счёт</h2>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="label">Номер счёта</label>
-              <input className="input" value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} />
-            </div>
-
-            <div>
-              <label className="label">Компания</label>
-              <input className="input" value={firm} onChange={(e) => setFirm(e.target.value)} />
-            </div>
-
-            <div>
-              <label className="label">Этап</label>
-              <select
-                className="input"
-                value={phase}
-                onChange={(e) => {
-                  const v = e.target.value as Phase;
-                  setPhase(v);
-                  setTarget(v === "phase2" ? "5" : v === "phase1" ? "8" : "0");
-                }}
-              >
-                <option value="phase1">Фаза 1</option>
-                <option value="phase2">Фаза 2</option>
-                <option value="live">Лайв</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="label">Размер счёта</label>
-              <input className="input" value={size} onChange={(e) => setSize(e.target.value)} />
-            </div>
-
-            <div>
-              <label className="label">Текущий баланс</label>
-              <input className="input" value={balance} onChange={(e) => setBalance(e.target.value)} />
-            </div>
-
-            <div>
-              <label className="label">Лимит просадки (%)</label>
-              <input className="input" value={maxDD} onChange={(e) => setMaxDD(e.target.value)} />
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="label">Цель прибыли (%)</label>
-              <input
-                className="input"
-                disabled={phase === "live"}
-                value={phase === "live" ? "" : target}
-                onChange={(e) => setTarget(e.target.value)}
-              />
-            </div>
-
-            <div className="flex items-end">
-              <button
-                onClick={createAccount}
-                className="btn-primary w-full"
-                disabled={loading}
-              >
-                Добавить
-              </button>
-            </div>
+          <div className="flex items-center gap-2">
+            <Link href="/" className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50">
+              Главная
+            </Link>
+            <Link
+              href="/accounts/new"
+              className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+              title="Добавить новый счет"
+            >
+              Добавить счёт
+            </Link>
           </div>
         </div>
+      </header>
 
-        <div className="bg-white rounded-3xl shadow-lg overflow-hidden">
-          <div className="px-6 py-4 bg-gray-50 border-b">
-            <div className="text-sm font-semibold text-gray-700">Список счетов</div>
+      <section className="mx-auto max-w-6xl px-6 pb-10">
+        {errMsg ? (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{errMsg}</div>
+        ) : null}
+
+        {/* ACTIVE */}
+        <div className="rounded-2xl bg-white p-6 shadow-sm border">
+          <div className="flex items-center justify-between">
+            <div className="text-lg font-semibold text-gray-900">Активные счета</div>
+            <div className="text-xs text-gray-500">Сверху — активные. Внизу — слитые.</div>
           </div>
 
-          {loading ? (
-            <div className="p-6 text-gray-600">Загрузка...</div>
-          ) : accounts.length === 0 ? (
-            <div className="p-10 text-center text-gray-500">Пока нет счетов</div>
+          {view.active.length === 0 ? (
+            <div className="mt-3 text-sm text-gray-600">
+              Активных счетов нет.{" "}
+              <Link href="/accounts/new" className="underline font-semibold">
+                Добавить счёт
+              </Link>
+            </div>
           ) : (
-            <div className="p-6 grid gap-4">
-              {accounts.map((a) => {
-                const pnl = calcPnLPercent(a);
-                const dd = calcToDD(a);
-                const pass = calcToPass(a);
-
+            <div className="mt-4 grid grid-cols-1 gap-3">
+              {view.active.map((a) => {
+                const ph = getPhase(a);
+                const phLabel = PHASE_LABEL[ph] || String(getPhaseRaw(a) || "—");
                 return (
-                  <div
-                    key={a.id}
-                    className="rounded-2xl border border-gray-200 p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+                  <Link
+                    key={String(a.id)}
+                    href={`/accounts/${a.id}`}
+                    className="block rounded-xl border bg-white p-4 hover:bg-gray-50"
+                    title="Открыть счет"
                   >
-                    <div className="space-y-1">
-                      <div className="text-lg font-semibold">
-                        {a.account_number ?? "-"}{" "}
-                        <span className="text-gray-400 font-normal">•</span>{" "}
-                        <span className="text-gray-700">{a.firm ?? "-"}</span>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="font-semibold text-gray-900">{getAccountLabel(a)}</div>
+                        <div className="mt-1 text-xs text-gray-500">Этап: {phLabel}</div>
                       </div>
-
-                      <div className="text-sm text-gray-600">
-                        Этап: <span className="text-gray-900">{nicePhase(a.phase)}</span> • Размер:{" "}
-                        <span className="text-gray-900">{a.size ?? 0}$</span> • Баланс:{" "}
-                        <span className="text-gray-900">{a.balance ?? 0}$</span>
-                      </div>
-
-                      <div className="text-sm text-gray-600">
-                        До лимита:{" "}
-                        <span className="text-gray-900">
-                          {dd.leftUsd.toFixed(2)}$ ({dd.leftPct.toFixed(2)}%)
-                        </span>
-                        {a.phase !== "live" && pass && (
-                          <>
-                            {" "}
-                            • До цели:{" "}
-                            <span className="text-gray-900">
-                              {pass.leftUsd.toFixed(2)}$ ({pass.leftPct.toFixed(2)}%)
-                            </span>
-                          </>
-                        )}
+                      <div className="text-right">
+                        <div className="text-sm font-semibold text-gray-900">{fmtUsd(getBalance(a))}</div>
+                        <div className="text-xs text-gray-500">Баланс</div>
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-3 justify-between md:justify-end">
-                      <div
-                        className={
-                          "px-3 py-1 rounded-full text-sm font-semibold " +
-                          (pnl >= 0 ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-700 border border-red-200")
-                        }
-                      >
-                        {pnl.toFixed(2)}%
-                      </div>
-
-                      <button className="btn-outline" onClick={() => openEdit(a)}>
-                        Редактировать
-                      </button>
-
-                      <button className="btn-danger" onClick={() => deleteAccount(a.id)}>
-                        Удалить
-                      </button>
-                    </div>
-                  </div>
+                  </Link>
                 );
               })}
             </div>
           )}
         </div>
 
-        {/* EDIT MODAL */}
-        {editing && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-            <div className="bg-white w-full max-w-xl rounded-3xl shadow-xl p-6">
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <div className="text-lg font-bold">Редактировать счёт</div>
-                  <div className="text-sm text-gray-600">
-                    {editing.account_number ?? "-"} • {editing.firm ?? "-"}
-                  </div>
-                </div>
-                <button
-                  className="text-gray-500 hover:text-black"
-                  onClick={() => setEditing(null)}
-                  aria-label="Close"
-                >
-                  ✕
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Номер счёта</label>
-                  <input
-                    className="input"
-                    value={editForm.account_number}
-                    onChange={(e) => setEditForm({ ...editForm, account_number: e.target.value })}
-                  />
-                </div>
-
-                <div>
-                  <label className="label">Компания</label>
-                  <input
-                    className="input"
-                    value={editForm.firm}
-                    onChange={(e) => setEditForm({ ...editForm, firm: e.target.value })}
-                  />
-                </div>
-
-                <div>
-                  <label className="label">Этап</label>
-                  <select
-                    className="input"
-                    value={editForm.phase}
-                    onChange={(e) => {
-                      const v = e.target.value as Phase;
-                      setEditForm({
-                        ...editForm,
-                        phase: v,
-                        profit_target_percent: v === "phase2" ? "5" : v === "phase1" ? "8" : "",
-                      });
-                    }}
-                  >
-                    <option value="phase1">Фаза 1</option>
-                    <option value="phase2">Фаза 2</option>
-                    <option value="live">Лайв</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="label">Размер счёта</label>
-                  <input
-                    className="input"
-                    value={editForm.size}
-                    onChange={(e) => setEditForm({ ...editForm, size: e.target.value })}
-                  />
-                </div>
-
-                <div>
-                  <label className="label">Текущий баланс</label>
-                  <input
-                    className="input"
-                    value={editForm.balance}
-                    onChange={(e) => setEditForm({ ...editForm, balance: e.target.value })}
-                  />
-                </div>
-
-                <div>
-                  <label className="label">Лимит просадки (%)</label>
-                  <input
-                    className="input"
-                    value={editForm.max_drawdown_percent}
-                    onChange={(e) => setEditForm({ ...editForm, max_drawdown_percent: e.target.value })}
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="label">Цель прибыли (%)</label>
-                  <input
-                    className="input"
-                    disabled={editForm.phase === "live"}
-                    value={editForm.phase === "live" ? "" : editForm.profit_target_percent}
-                    onChange={(e) => setEditForm({ ...editForm, profit_target_percent: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-3 mt-6">
-                <button className="btn-outline w-full" onClick={() => setEditing(null)}>
-                  Отмена
-                </button>
-                <button className="btn-primary w-full" onClick={saveEdit}>
-                  Сохранить
-                </button>
-              </div>
+        {/* BLOWN */}
+        <div className="mt-4 rounded-2xl bg-white p-6 shadow-sm border">
+          <div className="flex items-center justify-between">
+            <div className="text-lg font-semibold text-gray-900">
+              Слитые счета <span className="text-sm text-red-700">(просадка ≥ 10%)</span>
             </div>
+            <div className="text-xs text-gray-500">Всегда внизу</div>
           </div>
-        )}
-      </div>
 
-      <style jsx>{`
-        .label {
-          display: block;
-          font-size: 12px;
-          color: #4b5563;
-          margin-bottom: 6px;
-        }
-        .input {
-          width: 100%;
-          border: 1px solid #e5e7eb;
-          border-radius: 14px;
-          padding: 10px 12px;
-          outline: none;
-        }
-        .input:focus {
-          border-color: #111827;
-        }
-        .btn-primary {
-          background: #000;
-          color: #fff;
-          border-radius: 14px;
-          padding: 10px 12px;
-          transition: 0.2s;
-        }
-        .btn-primary:hover {
-          background: #111827;
-        }
-        .btn-outline {
-          border: 1px solid #e5e7eb;
-          border-radius: 14px;
-          padding: 10px 12px;
-          background: #fff;
-          transition: 0.2s;
-        }
-        .btn-outline:hover {
-          background: #f3f4f6;
-        }
-        .btn-danger {
-          border: 1px solid #fecaca;
-          color: #b91c1c;
-          border-radius: 14px;
-          padding: 10px 12px;
-          background: #fff;
-          transition: 0.2s;
-        }
-        .btn-danger:hover {
-          background: #fef2f2;
-        }
-      `}</style>
-    </div>
+          {view.blown.length === 0 ? (
+            <div className="mt-3 text-sm text-gray-500">Слитых счетов нет.</div>
+          ) : (
+            <div className="mt-4 grid grid-cols-1 gap-3">
+              {view.blown.map((a) => {
+                const ph = getPhase(a);
+                const phLabel = PHASE_LABEL[ph] || String(getPhaseRaw(a) || "—");
+                const size = getSize(a);
+                const bal = getBalance(a);
+                const ddPct = size ? ((size - bal) / size) * 100 : 0;
+
+                return (
+                  <Link
+                    key={String(a.id)}
+                    href={`/accounts/${a.id}`}
+                    className="block rounded-xl border border-red-200 bg-red-50/40 p-4 hover:bg-red-50"
+                    title="Открыть слитый счет"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="font-semibold text-gray-900">{getAccountLabel(a)}</div>
+                        <div className="mt-1 text-xs text-gray-600">
+                          Этап: {phLabel} • Статус: <span className="font-semibold text-red-700">Слитый</span>
+                        </div>
+                        <div className="mt-1 text-xs text-gray-600">
+                          Просадка: <span className="font-semibold text-red-700">{ddPct.toFixed(2)}%</span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-semibold text-gray-900">{fmtUsd(bal)}</div>
+                        <div className="text-xs text-gray-600">Баланс</div>
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
+    </main>
   );
 }
