@@ -14,8 +14,7 @@ type Account = {
   balance: number | null;
   max_drawdown_percent: number | null;
   profit_target_percent: number | null;
-  status?: string | null;
-  created_at?: string | null;
+  status?: string | null; // blown/active/etc
 };
 
 function n(v: any) {
@@ -32,15 +31,9 @@ function fmtMoney(nv: number | null | undefined) {
   }).format(nv);
 }
 
-function fmtPctSigned(val: number, sign: "+" | "-") {
-  const x = Math.max(0, Math.abs(val));
+function fmtPctSigned(x: number) {
+  const sign = x > 0 ? "+" : "";
   return `${sign}${x.toFixed(2)}%`;
-}
-
-function fmtPctValue(val: number) {
-  // для "Результат: -5.27%" (знак сам)
-  const sign = val > 0 ? "+" : "";
-  return `${sign}${val.toFixed(2)}%`;
 }
 
 function phaseLabel(p: Account["phase"]) {
@@ -50,12 +43,50 @@ function phaseLabel(p: Account["phase"]) {
   return p ?? "—";
 }
 
-function normalizePhase(p: any): "live" | "phase2" | "phase1" | "other" {
-  const s = String(p || "").toLowerCase().trim();
-  if (s === "live" || s.includes("лайв")) return "live";
-  if (s === "phase2" || s.includes("phase 2") || s.includes("фаза 2")) return "phase2";
-  if (s === "phase1" || s.includes("phase 1") || s.includes("фаза 1")) return "phase1";
-  return "other";
+function phaseColorClass(p: Account["phase"]) {
+  // Цветим только верхнюю “шапку” (номер/фирма/размер)
+  if (p === "live") return "bg-green-50 border-green-200 text-green-900";
+  if (p === "phase2") return "bg-blue-50 border-blue-200 text-blue-900";
+  return "bg-orange-50 border-orange-200 text-orange-900"; // phase1 и всё остальное
+}
+
+function isBlownAccount(a: Account) {
+  const st = String(a.status || "").toLowerCase().trim();
+  return st === "blown" || st === "slit" || st === "слил";
+}
+
+/**
+ * Результат: (balance-size)/size * 100
+ * До слива:   (minBalance-balance)/size*100  -> всегда отрицательное или 0
+ * До прохождения фазы: (targetBalance-balance)/size*100 -> всегда положительное или 0 (только для phase1/phase2)
+ */
+function calcMetrics(a: Account) {
+  const size = n(a.size);
+  const balance = n(a.balance);
+
+  const ddPct = n(a.max_drawdown_percent);
+  const targetPct = n(a.profit_target_percent);
+
+  const resultPct = size > 0 ? ((balance - size) / size) * 100 : 0;
+
+  const minBalance = size > 0 ? size * (1 - ddPct / 100) : 0;
+  const toBlowPct = size > 0 ? ((minBalance - balance) / size) * 100 : 0; // <= 0
+
+  const targetBalance = size > 0 ? size * (1 + targetPct / 100) : 0;
+  const toPassPct = size > 0 ? ((targetBalance - balance) / size) * 100 : 0; // >= 0
+
+  const profitMoney = balance - size;
+
+  return {
+    size,
+    balance,
+    ddPct,
+    targetPct,
+    resultPct,
+    toBlowPct: Math.min(0, toBlowPct),
+    toPassPct: Math.max(0, toPassPct),
+    profitMoney,
+  };
 }
 
 export default function AccountsPage() {
@@ -79,9 +110,7 @@ export default function AccountsPage() {
 
     const { data, error } = await supabase
       .from("accounts")
-      .select(
-        "id, account_number, firm, size, phase, balance, max_drawdown_percent, profit_target_percent, status, created_at"
-      )
+      .select("id, account_number, firm, size, phase, balance, max_drawdown_percent, profit_target_percent, status")
       .order("created_at", { ascending: true });
 
     if (error) setError(error.message);
@@ -94,91 +123,53 @@ export default function AccountsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // --- blown logic (как у тебя): по статусу ИЛИ по -10% от размера
-  const isBlown = (a: Account) => {
-    const st = String(a.status || "").toLowerCase().trim();
-    if (st === "blown" || st === "slit" || st === "слил") return true;
+  // Группируем + считаем суммы + сортируем активные по порядку: live -> phase2 -> phase1
+  const {
+    activeAccounts,
+    blownAccounts,
+    totalAlloc,
+    phase1Alloc,
+    phase2Alloc,
+    liveAlloc,
+    blownTotalAlloc,
+  } = useMemo(() => {
+    const blown = accounts.filter((a) => isBlownAccount(a));
+    const active = accounts.filter((a) => !isBlownAccount(a));
 
-    const size = n(a.size);
-    const bal = n(a.balance);
-    if (!size) return false;
-    return bal <= size * 0.9; // 10% DD по умолчанию
-  };
+    const sumSize = (arr: Account[]) => arr.reduce((s, a) => s + (n(a.size) || 0), 0);
 
-  // --- расчет процентов/дистанций
-  function calcMetrics(a: Account) {
-    const size = n(a.size);
-    const bal = n(a.balance);
-    const ddPct = n(a.max_drawdown_percent); // например 10
-    const targetPct = n(a.profit_target_percent); // например 8
+    let p1 = 0;
+    let p2 = 0;
+    let lv = 0;
 
-    const resultPct = size > 0 ? ((bal - size) / size) * 100 : 0; // текущий результат от размера
+    for (const a of active) {
+      if (a.phase === "phase1") p1 += n(a.size);
+      else if (a.phase === "phase2") p2 += n(a.size);
+      else if (a.phase === "live") lv += n(a.size);
+    }
 
-    // До слива (в % от размера): сколько осталось до minBalance, но показываем ВСЕГДА со знаком "-"
-    // minBal = size*(1 - ddPct/100)
-    // remaining = (bal - minBal)/size*100
-    const minBal = size > 0 ? size * (1 - ddPct / 100) : 0;
-    const remainingToSlipPct = size > 0 ? ((bal - minBal) / size) * 100 : 0; // сколько осталось
-    const toSlipDisplay = fmtPctSigned(remainingToSlipPct, "-"); // всегда "-"
-
-    // До прохождения фазы (всегда "+"): targetPct - resultPct (если отрицательно -> 0)
-    const toPassPct = Math.max(0, targetPct - resultPct);
-    const toPassDisplay = fmtPctSigned(toPassPct, "+");
-
-    // Профит в $ для лайва
-    const profitMoney = size > 0 ? bal - size : 0;
-
-    return {
-      size,
-      bal,
-      ddPct,
-      targetPct,
-      resultPct,
-      toSlipDisplay,
-      toPassDisplay,
-      profitMoney,
-    };
-  }
-
-  const computed = useMemo(() => {
-    const blown = accounts.filter((a) => isBlown(a));
-    const active = accounts.filter((a) => !isBlown(a));
-
-    // сортировка активных: live -> phase2 -> phase1
-    const phaseRank = (a: Account) => {
-      const ph = normalizePhase(a.phase);
-      if (ph === "live") return 0;
-      if (ph === "phase2") return 1;
-      if (ph === "phase1") return 2;
+    const orderRank = (a: Account) => {
+      if (a.phase === "live") return 0;
+      if (a.phase === "phase2") return 1;
+      if (a.phase === "phase1") return 2;
       return 3;
     };
 
-    const byCreated = (a: Account, b: Account) => {
-      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return ta - tb;
-    };
-
     const activeSorted = [...active].sort((a, b) => {
-      const ra = phaseRank(a);
-      const rb = phaseRank(b);
+      const ra = orderRank(a);
+      const rb = orderRank(b);
       if (ra !== rb) return ra - rb;
-      // внутри группы — старые выше (как было у тебя по created_at asc)
-      return byCreated(a, b);
+      // дальше просто по size (большие выше) — чтобы красиво
+      return n(b.size) - n(a.size);
     });
-
-    const sumSize = (arr: Account[]) => arr.reduce((s, a) => s + n(a.size), 0);
-
-    const phase1Sum = activeSorted.filter((a) => normalizePhase(a.phase) === "phase1").reduce((s, a) => s + n(a.size), 0);
-    const phase2Sum = activeSorted.filter((a) => normalizePhase(a.phase) === "phase2").reduce((s, a) => s + n(a.size), 0);
-    const liveSum = activeSorted.filter((a) => normalizePhase(a.phase) === "live").reduce((s, a) => s + n(a.size), 0);
 
     return {
       activeAccounts: activeSorted,
-      blownAccounts: blown, // слитые всегда отдельным блоком внизу
-      phase1Sum,
-      phase2Sum,
-      liveSum,
+      blownAccounts: blown,
+      totalAlloc: sumSize(active),
+      phase1Alloc: p1,
+      phase2Alloc: p2,
+      liveAlloc: lv,
       blownTotalAlloc: sumSize(blown),
     };
   }, [accounts]);
@@ -209,11 +200,21 @@ export default function AccountsPage() {
         <div className="flex items-start sm:items-center justify-between gap-4 mb-6">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Счета</h1>
+
             <p className="text-gray-600 mt-1">
-              Фаза 1: <span className="font-semibold text-gray-900">{fmtMoney(computed.phase1Sum)}</span> •{" "}
-              Фаза 2: <span className="font-semibold text-gray-900">{fmtMoney(computed.phase2Sum)}</span> •{" "}
-              Лайв: <span className="font-semibold text-gray-900">{fmtMoney(computed.liveSum)}</span> •{" "}
-              Слитые: <span className="font-semibold text-gray-900">{fmtMoney(computed.blownTotalAlloc)}</span>
+              Всего: <span className="font-semibold text-gray-900">{fmtMoney(totalAlloc)}</span>
+              {" • "}
+              Фаза 1: <span className="font-semibold text-gray-900">{fmtMoney(phase1Alloc)}</span>
+              {" • "}
+              Фаза 2: <span className="font-semibold text-gray-900">{fmtMoney(phase2Alloc)}</span>
+              {" • "}
+              Лайв: <span className="font-semibold text-gray-900">{fmtMoney(liveAlloc)}</span>
+              {blownAccounts.length > 0 && (
+                <>
+                  {" • "}
+                  Слитые: <span className="font-semibold text-gray-900">{fmtMoney(blownTotalAlloc)}</span>
+                </>
+              )}
             </p>
           </div>
 
@@ -247,9 +248,7 @@ export default function AccountsPage() {
         {!loading && accounts.length === 0 && (
           <div className="rounded-2xl border bg-white p-8 text-center">
             <h2 className="text-xl font-semibold text-gray-900">Счетов пока нет</h2>
-            <p className="text-gray-600 mt-2">
-              Добавь первый счёт — и начнём считать прогресс, лимиты и аналитику.
-            </p>
+            <p className="text-gray-600 mt-2">Добавь первый счёт — и начнём считать прогресс, лимиты и аналитику.</p>
             <Link
               href="/accounts/new"
               className="mt-6 inline-flex items-center justify-center rounded-xl px-5 py-3 bg-black text-white font-semibold hover:opacity-90 transition"
@@ -272,72 +271,67 @@ export default function AccountsPage() {
         )}
 
         {/* Active list */}
-        {!loading && computed.activeAccounts.length > 0 && (
+        {!loading && activeAccounts.length > 0 && (
           <section className="mb-10">
             <h2 className="text-lg font-semibold text-gray-900 mb-3">Активные счета</h2>
 
-            {/* ВАЖНО: 1 колонка (один за другим) */}
-            <div className="grid grid-cols-1 gap-4">
-              {computed.activeAccounts.map((a) => {
-                const ph = normalizePhase(a.phase);
+            {/* Карточки один за другим */}
+            <div className="space-y-4">
+              {activeAccounts.map((a) => {
                 const m = calcMetrics(a);
+                const topCls = phaseColorClass(a.phase);
 
                 const resultCls =
-                  m.resultPct > 0 ? "text-green-700" : m.resultPct < 0 ? "text-red-700" : "text-gray-700";
+                  m.resultPct > 0 ? "text-green-700" : m.resultPct < 0 ? "text-red-700" : "text-gray-800";
 
-                const profitCls =
-                  m.profitMoney > 0 ? "text-green-700" : m.profitMoney < 0 ? "text-red-700" : "text-gray-700";
+                const toBlowCls = m.toBlowPct < 0 ? "text-red-700" : "text-gray-800";
+
+                const showPass = a.phase === "phase1" || a.phase === "phase2";
 
                 return (
                   <div key={a.id} className="rounded-2xl border bg-white p-5 shadow-sm">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-lg font-bold text-gray-900 truncate">
+                        {/* Цветная шапка */}
+                        <div className={`inline-flex items-center rounded-xl border px-3 py-2 font-bold ${topCls}`}>
                           {a.account_number || "Без номера"}{" "}
-                          <span className="text-gray-400 font-semibold">•</span>{" "}
-                          <span className="text-gray-700 font-semibold">{a.firm || "—"}</span>{" "}
-                          <span className="text-gray-400 font-semibold">•</span>{" "}
-                          <span className="text-gray-900">{fmtMoney(a.size)}</span>
+                          <span className="opacity-60">•</span>{" "}
+                          {a.firm || "—"}{" "}
+                          <span className="opacity-60">•</span>{" "}
+                          {fmtMoney(a.size)}
                         </div>
 
-                        <div className="text-sm text-gray-600 mt-1">
+                        <div className="text-sm text-gray-600 mt-2">
                           Этап: {phaseLabel(a.phase)} •{" "}
-                          <span>
-                            Результат: <span className={`font-semibold ${resultCls}`}>{fmtPctValue(m.resultPct)}</span>
-                          </span>{" "}
+                          <span className={`${resultCls} font-semibold`}>Результат: {fmtPctSigned(m.resultPct)}</span>{" "}
                           •{" "}
-                          <span>
-                            До слива: <span className="font-semibold text-gray-900">{m.toSlipDisplay}</span>
-                          </span>
-                          {ph === "phase1" || ph === "phase2" ? (
+                          <span className={`${toBlowCls} font-semibold`}>До слива: {fmtPctSigned(m.toBlowPct)}</span>
+                          {showPass ? (
                             <>
                               {" "}
                               •{" "}
-                              <span>
-                                До прохождения:{" "}
-                                <span className="font-semibold text-gray-900">{m.toPassDisplay}</span>
+                              <span className="text-blue-700 font-semibold">
+                                До прохождения: {fmtPctSigned(m.toPassPct)}
                               </span>
                             </>
                           ) : null}
-                          {ph === "live" ? (
+                          {a.phase === "live" ? (
                             <>
                               {" "}
                               •{" "}
-                              <span>
-                                Профит:{" "}
-                                <span className={`font-semibold ${profitCls}`}>{fmtMoney(m.profitMoney)}</span>
+                              <span className={`${m.profitMoney >= 0 ? "text-green-700" : "text-red-700"} font-semibold`}>
+                                Профит: {fmtMoney(m.profitMoney)}
                               </span>
                             </>
                           ) : null}
                         </div>
 
                         <div className="text-sm text-gray-600 mt-1">
-                          Баланс:{" "}
-                          <span className="font-semibold text-gray-900">{fmtMoney(a.balance)}</span>
+                          Баланс: <span className="font-semibold text-gray-900">{fmtMoney(a.balance)}</span>
                         </div>
                       </div>
 
-                      {/* Actions (карточка НЕ кликабельна) */}
+                      {/* Actions */}
                       <div className="flex items-center gap-2 shrink-0">
                         <Link
                           href={`/accounts/edit?id=${a.id}`}
@@ -364,25 +358,21 @@ export default function AccountsPage() {
           </section>
         )}
 
-        {/* Blown list (всегда внизу) */}
-        {!loading && computed.blownAccounts.length > 0 && (
+        {/* Blown list */}
+        {!loading && blownAccounts.length > 0 && (
           <section>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg font-semibold text-gray-900">
                 Слитые счета{" "}
                 <span className="text-gray-500 font-medium">
-                  ({computed.blownAccounts.length} • {fmtMoney(computed.blownTotalAlloc)})
+                  ({blownAccounts.length} • {fmtMoney(blownTotalAlloc)})
                 </span>
               </h2>
             </div>
 
-            {/* тоже 1 колонка */}
-            <div className="grid grid-cols-1 gap-4">
-              {computed.blownAccounts.map((a) => {
+            <div className="space-y-4">
+              {blownAccounts.map((a) => {
                 const m = calcMetrics(a);
-                const resultCls =
-                  m.resultPct > 0 ? "text-green-700" : m.resultPct < 0 ? "text-red-700" : "text-gray-700";
-
                 return (
                   <div
                     key={a.id}
@@ -398,23 +388,22 @@ export default function AccountsPage() {
                           <span className="text-gray-900">{fmtMoney(a.size)}</span>
                         </div>
 
-                        <div className="text-sm text-gray-700 mt-1">
-                          Статус: <span className="font-semibold text-red-700">Слит</span> • Этап:{" "}
-                          {phaseLabel(a.phase)}
+                        <div className="text-sm text-gray-700 mt-2">
+                          Статус: <span className="font-semibold text-red-700">Слит</span> • Этап: {phaseLabel(a.phase)}
                         </div>
 
                         <div className="text-sm text-gray-700 mt-1">
-                          Результат: <span className={`font-semibold ${resultCls}`}>{fmtPctValue(m.resultPct)}</span> •{" "}
-                          Баланс: <span className="font-semibold text-gray-900">{fmtMoney(a.balance)}</span>
+                          <span className="font-semibold text-red-700">Результат: {fmtPctSigned(m.resultPct)}</span>{" "}
+                          • Баланс: <span className="font-semibold text-gray-900">{fmtMoney(a.balance)}</span>
                         </div>
 
-                        <div className="mt-2 text-xs text-gray-600">
+                        <div className="text-xs text-gray-600 mt-2">
                           Слитые счета нельзя редактировать/удалять.
                         </div>
                       </div>
 
-                      {/* НЕТ кнопок */}
-                      <div className="shrink-0" />
+                      {/* Никаких кнопок для слитых */}
+                      <div />
                     </div>
                   </div>
                 );
